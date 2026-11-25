@@ -22,8 +22,17 @@ export const DEFAULT_INBOX_AUTH_PORT = 19501;
 /** Better-auth's own base path; nothing else may take it. */
 export const AUTH_BASE_PATH = "/api/auth";
 export const AUTH_LOGIN_PATH = "/login";
+/**
+ * Passkeys at the door: the page that lists and removes them, and the door's own two endpoints for
+ * that. They are door paths and not window paths — the window is the Inbox on this computer, which is
+ * already signed in by being here — and they name the signed-in account by its session, never by an
+ * address in the request, so a call cannot ask for somebody else's passkeys.
+ */
+export const PASSKEY_PAGE_PATH = "/passkeys";
+export const PASSKEY_JS_PATH = "/passkeys.js";
+export const PASSKEY_API_PATH = "/api/inbox/auth/passkeys";
 /** The page's own assets, served by the door and by nobody else. */
-export const AUTH_ASSET_PATHS = ["/auth.css", "/auth.js"] as const;
+export const AUTH_ASSET_PATHS = ["/auth.css", "/auth.js", PASSKEY_JS_PATH] as const;
 /** Every cookie the door's auth sets starts with this, and none of them reaches the window. */
 export const AUTH_COOKIE_PREFIX = "plannotator";
 
@@ -121,6 +130,10 @@ export function resolveInboxAuth(
 export function isAuthOwnedPath(path: string): boolean {
   if (path === AUTH_LOGIN_PATH || path === `${AUTH_LOGIN_PATH}/`) return true;
   if ((AUTH_ASSET_PATHS as readonly string[]).includes(path)) return true;
+  if (path === PASSKEY_API_PATH || path.startsWith(`${PASSKEY_API_PATH}/`)) return true;
+  // `PASSKEY_PAGE_PATH` is deliberately not here: the door answers it, but it is somewhere a
+  // signed-in person may be sent back to, so a `?next=/passkeys` is a real destination, not the
+  // sign-in page under another name.
   return path === AUTH_BASE_PATH || path.startsWith(`${AUTH_BASE_PATH}/`);
 }
 
