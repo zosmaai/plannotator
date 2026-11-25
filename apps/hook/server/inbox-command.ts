@@ -74,6 +74,7 @@ import { handleInboxServerReady, startInboxServer } from "@plannotator/server/in
 import { INBOX_DB_FILE, InboxReturnError, inboxReturnFailedWords } from "@plannotator/shared/inbox/store-log/sqlite-return/return";
 import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
 import { describeCfAccessRecord, runCfAccessCommand } from "./inbox-cf-access-command";
+import { runInboxAuthCommand } from "./inbox-auth-command";
 import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
 import { isRemoteSession } from "@plannotator/server/remote";
 import { assertTestHome } from "@plannotator/server/test-home-guard";
@@ -859,6 +860,10 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
 
   if (args[0] === "cloudflare-access") {
     process.exit(await runCfAccessCommand(args.slice(1), { dataDir, json: assets.json === true, ensureRunning: () => ensureInboxRunning(dataDir) }));
+  }
+
+  if (args[0] === "auth") {
+    process.exit(await runInboxAuthCommand(args.slice(1), { dataDir, json: assets.json === true, ensureRunning: () => ensureInboxRunning(dataDir) }));
   }
 
   if (args[0] === "link" || args[0] === "unlink") {

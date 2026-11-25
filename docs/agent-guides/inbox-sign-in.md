@@ -1,0 +1,37 @@
+## Inbox: signing in with an account
+
+A third way to reach the Inbox from another device, after the tailnet and Cloudflare Access: a public name, one account of the Inbox's own, and a password. No Cloudflare account, no tailnet, no Access application. Off and invisible until `plannotator inbox auth on` runs, and off again with `auth off`.
+
+It is built on [Better Auth](https://better-auth.com) (`better-auth` in `packages/server/package.json`), so what the person gets is the library's own, well-tested sign-in: email and password, hashed with its own scrypt, session cookies, session revocation on a password change or an account removal, and rate limiting. Nothing about passwords, hashing, cookies or sessions is written here.
+
+**Files.**
+- `packages/shared/inbox/auth-door.ts`: settings (config.json `inboxAuth`, `PLANNOTATOR_INBOX_AUTH`, `PLANNOTATOR_INBOX_AUTH_HOST`, `PLANNOTATOR_INBOX_AUTH_ALLOW`, `PLANNOTATOR_INBOX_AUTH_PORT`), the allowlist, `safeNextPath`, `withoutAuthCookies`, `isAuthOwnedPath`, the cookie name.
+- `packages/server/inbox-auth-instance.ts`: the Better Auth instance, its sqlite file, the account calls the CLI and the door share (`list`, `set`, `remove`), `sessionUser`.
+- `packages/server/inbox-auth-door.ts`: the listener, the checks, the dispatch, the registry record.
+- `packages/server/inbox-auth-login.ts`: the sign-in page, `/auth.css`, `/auth.js`.
+- `apps/hook/server/inbox-auth-command.ts`: `plannotator inbox auth add | list | remove | on | off | status`.
+
+**Two listeners, one window.** The window keeps its loopback port and its URL, untouched: nothing about it changes, and a start with no `inboxAuth` in config.json behaves exactly as before. Signing in happens on a **second loopback listener** (`127.0.0.1:<port>`, `19501` unless `--port` says otherwise), which is the only target a tunnel or proxy points at. That port answers its own name only (check 0), so a name pointed at it by mistake, or by someone else, signs nobody in.
+
+**The door.** Every request passes these checks in order; the first failure answers JSON `{error, code}` on `/api/*` and `/mcp`, plain text elsewhere, `no-store`:
+0. `Host` is the configured name (`:443` or none): anything else, including another name pointed at this port, is `403 forbidden_host`.
+1. `/mcp`, every connection route (`/api/inbox/control/*`, `/api/inbox/bridge/*`) and a launched session's permission hook (`/api/inbox/launch/<key>/permission`) are refused (`403 local_only`), signed in or not: an agent's work never comes in from the internet.
+2. The sign-in page's own paths (`/login`, `/auth.css`, `/auth.js`) and Better Auth's (`/api/auth/*`) are the door's, and are answered here.
+3. A session it can read, and whose address is on the allowlist: the request goes to the window, dispatched as `served(req, "tailnet")` exactly as the Cloudflare door dispatches (no `/mcp`, no connection route, no device door).
+4. No session: an HTML navigation (a `sec-fetch-dest` of `document`, or an `Accept` that names `text/html` with a method that is `GET` or `HEAD`) is `303` to `/login?next=<the path>`, and anything else is `401` (`auth_required`, or `account_not_allowed` for a session whose address is off the allowlist).
+
+Before it reaches the window, `Cf-*`, `Tailscale-*`, `X-Forwarded-*` and `Plannotator-Door*` are dropped (`scrubAuthDoorHeaders`), and the door's own session cookies are dropped too (`withoutAuthCookies`): the window has never heard of them, and its routes can never be made to read one.
+
+**The sign-in page.** One HTML page, no framework, its own CSP (`default-src 'none'`, `connect-src 'self'`), served with the form in it so the first paint has the fields: an address, a password, the door's host name, and the `next` path as a hidden field. `next` is `safeNextPath(...)`: a path on this site only (`//host`, another origin, `/\host`, the sign-in page itself and `/api/…` all become `/`). Already signed in, a visit to `/login` is a `303` to that `next`, so a bookmark of the form never traps someone who is already in. A failed sign-in says one line — Better Auth's own code mapped to plain words (`INVALID_EMAIL_OR_PASSWORD`, `TOO_MANY_REQUESTS` and so on) — and never says whether the address exists. `/auth.js` is small and does one thing: fetch `POST /api/auth/sign-in/email`, then `location.assign(next)`; with no JavaScript the form posts to the same path and the door answers the `303` itself.
+
+**Accounts, made here.** There is no self-sign-up (`disableSignUp: true`): accounts are made at the terminal, `plannotator inbox auth add <address>`, with the password asked for twice, not echoed, at least 12 characters (`AUTH_MIN_PASSWORD_LENGTH`), and its address must already be on the allowlist to get in. `auth add` on an existing address sets a new password and ends every session it had (`AUTH_SESSION_SECONDS` is 7 days, renewed at most daily). `auth remove` ends them and deletes the account. The accounts and their sessions live in sqlite in the data folder (`<dataDir>/auth.sqlite`, WAL), and Better Auth's signing secret beside it in `<dataDir>/auth-secret` (0600, 32 random bytes, made once), so a restart keeps sessions; `PLANNOTATOR_AUTH_SECRET` overrides the file, which is what a test uses.
+
+**The allowlist is the gate, the account is the key.** `inboxAuth.allow` names the addresses that may enter; a signed-in session whose address is not on it is refused (`account_not_allowed`, and the page says so), and `auth list` marks the account as not on the allowlist rather than hiding it. Take an address off the allowlist and it cannot get in, though its account stays for the day it is put back; `auth remove` is the other half.
+
+**Rate limiting.** Better Auth's own: 60 requests a minute per client address, and 10 sign-in attempts per address per 5 minutes (`customRules`). The client's address comes from the tunnel in front of the door (`cf-connecting-ip`, else the first `x-forwarded-for` hop), which keeps one guesser from using up everyone's budget; with neither header, all clients share one bucket, so a door behind a proxy that forwards neither header limits everyone together, which is the safe direction.
+
+**Config and the running Inbox.** `auth on` writes config.json (`{on, host, allow, port}`) and then asks a running Inbox to open the door now, through `POST /api/inbox/control/auth` (a connection route: this machine, the Inbox's token, no Origin), which re-reads config.json, opens, closes or moves the listener and writes the record into the registry (`inbox_auth: {on, url, port, allow, error}`), the same way the Cloudflare door does. With no Inbox running it says the door opens at the next start. `auth off` closes it and keeps the accounts.
+
+**Tests.** `packages/server/inbox-auth-door.test.ts` (the door end to end on a real listener: off by default, the `303` and the `401`, sign in and reach the window, a wrong password, an address off the allowlist, `/mcp` refused, the page's CSP and host, cookie stripping, `safeNextPath`) and `apps/hook/server/inbox-auth-command.test.ts` (the command: config.json, the twice-typed password, the allowlist note, remove, off, `--json`).
+
+**Not built, and why.** Passkeys, TOTP two-factor, password reset by email, invites with a link, and more than one door at a time: each is a next step on top of Better Auth's own plugins (it ships all four), and none is needed to let one person in at a public name. `auth add` is the invite, and the person at the machine is the only one who makes accounts.

@@ -1,0 +1,170 @@
+import type { PlannotatorConfig } from "../config";
+import { isEmailAddress, isPublicDnsName, normalizeCfAccessEmail } from "./cf-access";
+
+/**
+ * The Inbox's sign-in door: a second loopback listener (like the tailnet's and
+ * Cloudflare Access's) that asks for a session before it hands a request to the
+ * window. It exists for people who want the Inbox on a public address without
+ * Cloudflare Access or Tailscale, with accounts of its own.
+ *
+ * Off and invisible until `inboxAuth` is set in config.json (or the env names
+ * it). The window's own loopback port is untouched: on this computer nothing
+ * asks for a password.
+ */
+
+export const INBOX_AUTH_ENV = "PLANNOTATOR_INBOX_AUTH";
+export const INBOX_AUTH_PORT_ENV = "PLANNOTATOR_INBOX_AUTH_PORT";
+export const INBOX_AUTH_HOST_ENV = "PLANNOTATOR_INBOX_AUTH_HOST";
+export const INBOX_AUTH_ALLOW_ENV = "PLANNOTATOR_INBOX_AUTH_ALLOW";
+/** The secret better-auth signs sessions with. Generated into the data folder when unset. */
+export const INBOX_AUTH_SECRET_ENV = "PLANNOTATOR_AUTH_SECRET";
+export const DEFAULT_INBOX_AUTH_PORT = 19501;
+/** Better-auth's own base path; nothing else may take it. */
+export const AUTH_BASE_PATH = "/api/auth";
+export const AUTH_LOGIN_PATH = "/login";
+/** The page's own assets, served by the door and by nobody else. */
+export const AUTH_ASSET_PATHS = ["/auth.css", "/auth.js"] as const;
+/** Every cookie the door's auth sets starts with this, and none of them reaches the window. */
+export const AUTH_COOKIE_PREFIX = "plannotator";
+
+export interface InboxAuthStored {
+  on?: boolean;
+  port?: number;
+  host?: string;
+  allow?: string[];
+}
+
+export interface InboxAuthSettings {
+  port: number;
+  host: string;
+  allow: string[];
+  /** What better-auth calls itself: the public address people sign in at. */
+  baseUrl: string;
+}
+
+export type InboxAuthResolution =
+  | { on: false; configured: boolean; settings: null; error: null }
+  | { on: true; configured: true; settings: InboxAuthSettings; error: null }
+  | { on: true; configured: true; settings: null; error: string };
+
+function truthy(raw: string | undefined): boolean | undefined {
+  const v = raw?.trim().toLowerCase();
+  if (v === "1" || v === "true" || v === "on") return true;
+  if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
+  return undefined;
+}
+
+export function parseInboxAuthEnv(env: NodeJS.ProcessEnv = process.env): boolean | undefined {
+  return truthy(env[INBOX_AUTH_ENV]);
+}
+
+export function storedInboxAuth(config: PlannotatorConfig): InboxAuthStored | null {
+  const value = (config as { inboxAuth?: unknown }).inboxAuth;
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as InboxAuthStored) : null;
+}
+
+export function normalizeAuthEmail(email: string): string {
+  return normalizeCfAccessEmail(email);
+}
+
+/** The allowlist from a config or env value: lowercased, de-duplicated, addresses only. */
+export function parseAuthAllowList(raw: unknown): string[] {
+  const parts = typeof raw === "string" ? raw.split(/[\s,]+/) : Array.isArray(raw) ? raw.filter((v): v is string => typeof v === "string") : [];
+  return [...new Set(parts.map(normalizeAuthEmail).filter(Boolean))];
+}
+
+export function isAllowedAuthEmail(allow: readonly string[], email: string | null | undefined): boolean {
+  if (!email) return false;
+  const normalized = normalizeAuthEmail(email);
+  return normalized !== "" && allow.includes(normalized);
+}
+
+export function parseInboxAuthSettings(
+  stored: InboxAuthStored,
+  env: NodeJS.ProcessEnv = process.env,
+  forbiddenPort: (port: number) => boolean = () => false,
+): InboxAuthSettings | { error: string } {
+  const hostRaw = env[INBOX_AUTH_HOST_ENV] ?? stored.host;
+  const host = typeof hostRaw === "string" ? hostRaw.trim().toLowerCase().replace(/\.$/, "") : "";
+  if (!isPublicDnsName(host)) return { error: "The hostname must be a public name like inbox.example.com." };
+
+  const portRaw = env[INBOX_AUTH_PORT_ENV] ?? stored.port ?? DEFAULT_INBOX_AUTH_PORT;
+  const port = typeof portRaw === "number" ? portRaw : Number.parseInt(String(portRaw), 10);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) return { error: "The listener port must be from 1024 to 65535." };
+  if (forbiddenPort(port)) return { error: `Port ${port} is kept for the Inbox's own use.` };
+
+  const allow = parseAuthAllowList(env[INBOX_AUTH_ALLOW_ENV] ?? stored.allow);
+  if (allow.length === 0) return { error: "The allowlist must name at least one e-mail address." };
+  const bad = allow.find((email) => !isEmailAddress(email));
+  if (bad) return { error: `"${bad}" is not an e-mail address.` };
+
+  return { port, host, allow, baseUrl: `https://${host}` };
+}
+
+export function resolveInboxAuth(
+  config: PlannotatorConfig,
+  env: NodeJS.ProcessEnv = process.env,
+  forbiddenPort: (port: number) => boolean = () => false,
+): InboxAuthResolution {
+  const stored = storedInboxAuth(config);
+  const configured = stored !== null && (typeof stored.host === "string" ? stored.host !== "" : env[INBOX_AUTH_HOST_ENV] !== undefined);
+  const fromEnv = parseInboxAuthEnv(env);
+  const on = configured && (stored?.on === true || fromEnv === true) && fromEnv !== false;
+  if (!on || !stored) return { on: false, configured, settings: null, error: null };
+  const parsed = parseInboxAuthSettings(stored, env, forbiddenPort);
+  return "error" in parsed
+    ? { on: true, configured: true, settings: null, error: parsed.error }
+    : { on: true, configured: true, settings: parsed, error: null };
+}
+
+/** The paths the door answers itself: never handed to the window. */
+export function isAuthOwnedPath(path: string): boolean {
+  if (path === AUTH_LOGIN_PATH || path === `${AUTH_LOGIN_PATH}/`) return true;
+  if ((AUTH_ASSET_PATHS as readonly string[]).includes(path)) return true;
+  return path === AUTH_BASE_PATH || path.startsWith(`${AUTH_BASE_PATH}/`);
+}
+
+/**
+ * A `?next=` value that may be sent back to after signing in: a path on this
+ * site only. Anything else (another origin, a `//host`, the login page itself)
+ * becomes the window's root.
+ */
+export function safeNextPath(raw: string | null | undefined): string {
+  if (typeof raw !== "string" || raw === "") return "/";
+  if (!raw.startsWith("/") || raw.startsWith("//") || raw.startsWith("/\\")) return "/";
+  let url: URL;
+  try {
+    url = new URL(raw, "https://door.invalid");
+  } catch {
+    return "/";
+  }
+  if (url.origin !== "https://door.invalid") return "/";
+  if (isAuthOwnedPath(url.pathname)) return "/";
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+/**
+ * True when a Cookie header carries only the door's own cookies (they are dropped before the window sees it).
+ *
+ * better-auth names its cookie `__Secure-<prefix>.session_token` on HTTPS (and `<prefix>.session_token` on
+ * plain HTTP), so the secure prefix is stripped before the name is compared: a cookie the window never sees
+ * cannot be mistaken for one it owns, and one it owns never leaks into its own session check.
+ */
+export function withoutAuthCookies(value: string): string {
+  return value
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part !== "")
+    .filter((part) => {
+      const name = part.slice(0, part.indexOf("=") === -1 ? undefined : part.indexOf("=")).replace(/^__(?:Secure|Host)-/i, "");
+      // better-auth names its cookies `<prefix>.<name>`, so the dot is what makes one the door's: a window cookie
+      // that happens to start the same letters (`plannotator-sidebar`) is the window's and is left alone.
+      return !name.toLowerCase().startsWith(`${AUTH_COOKIE_PREFIX.toLowerCase()}.`);
+    })
+    .join("; ");
+}
+
+/** The cookie better-auth sets for a session on this door (`__Secure-` on HTTPS, as better-auth names it). */
+export function authCookieName(secure: boolean): string {
+  return `${secure ? "__Secure-" : ""}${AUTH_COOKIE_PREFIX}.session_token`;
+}

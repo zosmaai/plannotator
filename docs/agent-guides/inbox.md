@@ -13,6 +13,7 @@ The Inbox details are split by topic. Read the foundation guide for command, ser
 - [`inbox-notifications-and-agents.md`](inbox-notifications-and-agents.md) — search, event streams, notifications, Board, and agent connections.
 - [`inbox-phones-and-security.md`](inbox-phones-and-security.md) — phone pairing and surface, security boundaries, and proofs.
 - [`inbox-cloudflare-access.md`](inbox-cloudflare-access.md) — reach through the person's own Cloudflare Tunnel and Access: the door's checks, session routing, setup and teardown.
+- [`inbox-sign-in.md`](inbox-sign-in.md) — a public name and an account of the Inbox's own (Better Auth): the sign-in door's checks, the page, accounts made at the terminal, the allowlist, and what is not built.
 - [`inbox-ship.md`](inbox-ship.md) — Ship in Reviews: a pull request handed to an agent until it is merged; the menu and agent picker, the watch and its notes, the `thread_pulls` `ship` log, ship mode on the row ("Glint"), the ship log and Stop, linked machines.
 - [`inbox-machines.md`](inbox-machines.md) — linked machines: one Inbox across machines, the link, the merged view, the forward and the outbox.
 - [`inbox-accounts.md`](inbox-accounts.md) — Settings → Accounts: the Claude accounts and usage of this computer and its linked machines, read through claude-swap.

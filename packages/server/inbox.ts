@@ -419,6 +419,7 @@ import { createInboxCloudGate } from "./inbox-cloud-gate";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { createInboxTailscale, isDoorTailnetPort, type InboxTailscale, type InboxTailscaleTimers } from "./inbox-tailscale";
 import { createInboxCfAccess, type InboxCfAccess, type InboxCfAccessContext } from "./inbox-cf-access";
+import { createInboxAuthDoor } from "./inbox-auth-door";
 import { CF_ACCESS_ROUTE, createCfAccessRoutes, type CfAccessRouteHooks } from "./inbox-cf-access-routes";
 import { hasCfEdgeHeaders } from "@plannotator/shared/inbox/cf-access";
 import { createInboxUpdates, type InboxUpdatesOptions } from "./inbox-updates";
@@ -4134,6 +4135,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     /** Over your tailnet: the switch, the address or why not, and who may open it. */
     tailscale: tailscale.state(),
     cloudflareAccess: cfAccess?.state() ?? null,
+    /** Sign in with an account: the address it answers on, or why not, and who may enter. */
+    inbox_auth: authDoor?.state() ?? null,
     /** Whether this page reached the Inbox through the tailnet (the switch cannot be turned on from there). */
     via,
     version,
@@ -5825,6 +5828,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let tailscale: InboxTailscale;
   let cfAccess: InboxCfAccess | null = null;
   let cfRoutes: ReturnType<typeof createCfAccessRoutes> | null = null;
+  // Sign in with an account (inbox-auth-door.ts): a public address with a password, made once the port is known.
+  let authDoor: ReturnType<typeof createInboxAuthDoor> | null = null;
   const fromCfDoor = new WeakSet<Request>();
   /**
    * Where the person wrote a message, told from this request (inbox-sent-from.ts): `here` for this computer's own
@@ -6337,6 +6342,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         cfAccess?.restart();
         return json({ cloudflare_access: cfAccess?.state() ?? null });
+      }
+      // `plannotator inbox auth on|off` while this Inbox runs: open, close or move the sign-in door now.
+      if (path === "/api/inbox/control/auth") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        authDoor?.restart();
+        return json({ inbox_auth: authDoor?.state() ?? null });
       }
       // `plannotator inbox` while this Inbox runs (an agent started it with
       // --background): connect the agents on this computer, as a start does.
@@ -8816,6 +8827,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...options.cloudflareAccess,
   });
   cfAccess.start();
+  authDoor = createInboxAuthDoor({
+    dataDir,
+    registry: () => registry,
+    // Like the Cloudflare door: through the window as `tailnet`, so no `/mcp`, no connection route, no device door.
+    dispatch: async (req) => markPlannotatorResponse(await encodeInboxResponse(req, await served(req, "tailnet"))),
+    forbiddenPort: (candidate) => candidate === port || candidate === INBOX_FORBIDDEN_PORT || isDoorTailnetPort(candidate),
+    maxRequestBodySize: INBOX_MAX_REQUEST_BYTES,
+    note: debugLog ? (event, data) => debugLog.note(event, data) : undefined,
+  });
+  authDoor.start();
   cfRoutes = createCfAccessRoutes({
     dataDir,
     door: cfAccess,
@@ -9057,6 +9078,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Over your tailnet: the mapping and the tailnet-only listener, before a restart starts the new run.
     tailnetStopFailedPort = tailscale.stop().failedPort;
     cfAccess?.stop();
+    authDoor?.stop();
   };
 
   return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, liveSites: { running: liveSites.running, sweep: liveSites.sweep }, qwenWake, t3Wake, antigravityWake, cloudWake, stop };

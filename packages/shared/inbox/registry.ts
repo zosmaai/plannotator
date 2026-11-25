@@ -87,6 +87,12 @@ export interface InboxRegistryEntry {
     tunnel?: { state: string; pid: number | null; connections: number; restarts: number; error: string | null };
   };
   /**
+   * "Sign in with an account" (config.json `inboxAuth`, adr/implementation/inbox-auth.md): the
+   * public address the sign-in door answers on while it is open, why not when it does not, its
+   * loopback port, and the addresses that may enter. Absent: the door was never switched on.
+   */
+  inbox_auth?: { url: string | null; error: string | null; port?: number; allow: string[] };
+  /**
    * The runs of this data folder before this one (additive): their `serverSession`s, newest first, at most
    * `INBOX_SESSION_LINEAGE_MAX` (`inboxSessionLineage`). A window left open across a restart proves with it that
    * the Inbox now answering is the same data it loaded from, and keeps writing without a reload.
