@@ -84,22 +84,21 @@ This is what is built. To make it honest rather than accidental:
   already true and keeps for free.
 - **The audit trail.** Today there is one line, `auth_door_request`
   (`packages/server/inbox-auth-door.ts:207`), three path segments, and only when debug logging is on
-  (`packages/server/inbox.ts:6093` — `note` is passed to the door only when `debugLog` exists, `:8837`;
-  off unless `PLANNOTATOR_INBOX_DEBUG` or the config-only flag says otherwise). The seam is tiny:
-  `sessionUser`'s `{ id, email, name }` is already in the door's hand at `:186`, so the note gains an
-  `account` field. For the stronger version — which person wrote this line in this thread — the field goes
-  on `InboxSentFrom` (`packages/core/inbox-sent-from.ts:12-19`) and its facts
-  (`packages/server/inbox-sent-from.ts:13-24`), which already carry place and machine and already reach
-  every write; `machine` was added the same additive way, so `account` follows it.
+  (`packages/server/inbox.ts:6093` — `note` reaches the door only when `debugLog` exists, `:8837`). The seam
+  is tiny: `sessionUser`'s `{ id, email, name }` is already in the door's hand at `:186`, so the note gains an
+  `account` field. For the stronger version — which person wrote this line in this thread — the field goes on
+  `InboxSentFrom` (`packages/core/inbox-sent-from.ts:12-19`) and its facts
+  (`packages/server/inbox-sent-from.ts:13-24`), which already carry place and machine and already reach every
+  write; `machine` was added that additive way, so `account` follows it.
 - **What "remove someone" means.** `auth remove <email>` asks "Remove … and end its sessions?"
-  (`apps/hook/server/inbox-auth-command.ts:17`, `:210`), deletes the account row and nothing else. Their threads
-  stay, their machines stay paired, their phones keep working. In model A that is the right meaning, and
-  it must be written down: removing a person closes the door, it does not erase them. Taking an address off
-  the allowlist is the softer half and is already documented (`docs/agent-guides/inbox-sign-in.md:29`).
+  (`apps/hook/server/inbox-auth-command.ts:17`, `:210`) and deletes the account row and nothing else: their
+  threads stay, their machines stay paired, their phones keep working. That is the right meaning in model A,
+  and it must be written down — removing a person closes the door, it does not erase them. Taking an address
+  off the allowlist is the softer half, already documented (`docs/agent-guides/inbox-sign-in.md:29`).
 - **Two people on one computer.** Nothing changes and nothing can: this computer's own port asks for no
-  password — "On this computer nothing asks for a password", `apps/hook/server/inbox-auth-command.ts:22-23`),
-  the phone pairs to the computer, `sent-from: here` means this computer. Two people at one keyboard are one person to the Inbox. Say so; it is fine for work and
-  wrong for a household.
+  password — "On this computer nothing asks for a password", `apps/hook/server/inbox-auth-command.ts:22-23`.
+  The phone pairs to the computer, `sent-from: here` means this computer. Two people at one keyboard are one
+  person to the Inbox. Say so: fine for work, wrong for a household.
 - **What the UI must show.** One thing: which account you are, so nobody answers a colleague's question
   thinking it is their own — "signed in as ada@…", in the window and on the phone. Nothing else: no member
   list, no owner badges, no "who did this" pane.
@@ -116,9 +115,9 @@ its own, not a filter on the one that exists):
 | Seam | What changes | Size |
 | --- | --- | --- |
 | Data folder | A folder per account instead of `getPlannotatorDataDir()` once per process (`packages/shared/data-dir.ts:63`) | day |
-| The door | The door must *route*: session → that account's folder, and hold or start one server per account. Today its context takes one `dataDir` and one `dispatch` (`packages/server/inbox-auth-door.ts:47`, `:49`; built once at `packages/server/inbox.ts:8830`) | **rewrite** |
+| The door | The door must *route*: session → that account's folder, holding or starting a server per account. Its context takes one `dataDir` and one `dispatch` (`packages/server/inbox-auth-door.ts:47`, `:49`; built once at `packages/server/inbox.ts:8830`) | **rewrite** |
 | `serverSession`, `inboxSessionLineage` | Both prove "this window belongs to this folder's run" (`packages/shared/inbox/registry.ts:49`, `:95-98`, `:125`); each account needs its own, and the window-mark test (`packages/server/inbox-sent-from.ts:20-24`) with them | weeks |
-| Registry `inbox.json` | One entry per account per computer — and every reader (Settings, the CLI, the machine link) learns which one. The folder's own identity is checked by device:inode (`packages/shared/inbox/registry.ts:101-102`) | week |
+| Registry `inbox.json` | One entry per account per computer, and every reader (Settings, the CLI, the machine link) learns which one; the folder's own identity is checked by device:inode (`packages/shared/inbox/registry.ts:101-102`) | week |
 | Tokens | The connection token (`packages/shared/inbox/registry.ts:48`, `:135`) and the device tokens (`packages/shared/inbox/devices.ts`) are minted per folder; per account, every caller that reads "the" token learns whose | week |
 | Machines, phones, devices | `inbox/devices.jsonl`, `inbox/device-secrets/` per account (`packages/shared/inbox/devices.ts:5-7`); pairing (`packages/server/inbox-devices.ts:105`), the relay and the machine link become per person | week-plus |
 | Threads, attachments, archive, undo | Every store call runs against a per-account store; today one store object is handed around the server and reached from one pipeline | **rewrite** |
@@ -132,14 +131,14 @@ Not a feature with a few corners: a second product that shares one screen.
 
 ## Security consequences
 
-- **Isolation today: none.** There is no per-account check anywhere between the door and the store. Any
-  allowed account can list every thread, read any thread by id, write, archive, delete. In model A that is
-  the design and the guide must say it; in model B it is the whole cost.
+- **Isolation today: none.** There is no per-account check anywhere between the door and the store: any
+  allowed account can list every thread, read any thread by id, write, archive, delete. In A that is the
+  design and the guide must say it; in B it is the whole cost.
 - **The audit gap is real and double.** Nothing names the account, and the one line that exists is written
   only when debug logging is on. A shared Inbox cannot answer "who answered this?" even after the fact.
-- **Deletion and retention.** Threads, attachments, archive and undo are per folder, and nothing is
+- **Deletion and retention.** Threads, attachments, archive and undo are per folder and nothing is
   per-account, because a record carries no account. In A, leaving the group leaves your words behind; in B,
-  leaving would take your folder with you, which nobody has built.
+  leaving would take your folder with you — which nobody has built.
 - **Shared machines.** A phone paired by one person shows another person's threads, same screen, same
   pocket. A has to live with that; B has to rebuild pairing.
 - **What one password buys.** In A: everything everyone wrote, plus the write path to every agent the
