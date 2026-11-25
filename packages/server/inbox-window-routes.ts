@@ -46,6 +46,7 @@ export const ROUTE_FILES = [
   'packages/server/inbox-artifact-pins.ts',
   'packages/server/inbox-ask.ts',
   'packages/server/inbox-attachments.ts',
+  'packages/server/inbox-auth-routes.ts',
   'packages/server/inbox-cf-access-routes.ts',
   'packages/server/inbox-combine.ts',
   'packages/server/inbox-comment-drafts.ts',
@@ -199,6 +200,7 @@ function skipQuantifier(body: string, at: number, to: number): { quantifier: str
 
 /** Modules inbox.ts imports that compare request paths without serving them, each with why. */
 export const NOT_ROUTE_MODULES: Record<string, string> = {
+  'packages/server/inbox-auth-door.ts': 'the sign-in door answers on its own listener (`/login`, `/auth.css`, `/auth.js`, Better Auth\'s `/api/auth/*`, and everything else it lets through to the window); it serves no path of the Inbox API itself (inbox-sign-in.md)',
   'packages/server/inbox-perf.ts': 'sorts requests into waiting ones for the timings; serves nothing',
   'packages/server/inbox-rex-far.ts': "reads a linked machine's answer to a forwarded Show in Rex (`/api/inbox/m/<machine>/rex/show`, which inbox-machines.ts serves); serves nothing",
   'packages/shared/star-ask.ts': "the plan, review and annotate servers' `/api/star-ask/*`; the Inbox takes only its helpers and serves `/api/inbox/star-ask`",

@@ -26,6 +26,7 @@ import { updateOwnInboxRegistry, type InboxRegistryEntry } from "@plannotator/sh
 import {
   AUTH_BASE_PATH,
   AUTH_LOGIN_PATH,
+  markFromAuthDoor,
   resolveInboxAuth,
   safeNextPath,
   withoutAuthCookies,
@@ -203,9 +204,14 @@ export function createInboxAuthDoor(context: InboxAuthDoorContext) {
     // 3. What the door never hands on.
     if (CLOSED.some((pattern) => pattern.test(path))) return jsonError(403, "local_only", "That route is for this computer only.");
 
-    // 4. The window.
+    // 4. The window. Marked on the object handed on, because nothing about the request says where it
+    // came from by then: its door headers are scrubbed and its address is this machine's own loopback.
+    // The sign-in settings are answered on every route, and this is what lets the Inbox refuse to let
+    // someone who signed in at the door change that door.
     context.note?.("auth_door_request", { path: path.split("/").slice(0, 3).join("/") });
-    return context.dispatch(rebuild(req, scrubAuthDoorHeaders(req.headers)));
+    const forward = rebuild(req, scrubAuthDoorHeaders(req.headers));
+    markFromAuthDoor(forward);
+    return context.dispatch(forward);
   };
 
   const start = () => {

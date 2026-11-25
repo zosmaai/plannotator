@@ -421,6 +421,7 @@ import { createInboxTailscale, isDoorTailnetPort, type InboxTailscale, type Inbo
 import { createInboxCfAccess, type InboxCfAccess, type InboxCfAccessContext } from "./inbox-cf-access";
 import { createInboxAuthDoor } from "./inbox-auth-door";
 import { CF_ACCESS_ROUTE, createCfAccessRoutes, type CfAccessRouteHooks } from "./inbox-cf-access-routes";
+import { AUTH_ROUTE, createAuthRoutes, refuseDoorOrigin } from "./inbox-auth-routes";
 import { hasCfEdgeHeaders } from "@plannotator/shared/inbox/cf-access";
 import { createInboxUpdates, type InboxUpdatesOptions } from "./inbox-updates";
 import { INBOX_WHATS_NEW_IMAGE_PATH, whatsNewImageRoute } from "./inbox-whats-new-images";
@@ -5830,6 +5831,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let cfRoutes: ReturnType<typeof createCfAccessRoutes> | null = null;
   // Sign in with an account (inbox-auth-door.ts): a public address with a password, made once the port is known.
   let authDoor: ReturnType<typeof createInboxAuthDoor> | null = null;
+  // The Settings card for that door (inbox-auth-routes.ts).
+  let authRoutes: ReturnType<typeof createAuthRoutes> | null = null;
   const fromCfDoor = new WeakSet<Request>();
   /**
    * Where the person wrote a message, told from this request (inbox-sent-from.ts): `here` for this computer's own
@@ -6421,6 +6424,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (path === CF_ACCESS_ROUTE || path.startsWith(`${CF_ACCESS_ROUTE}/`)) {
         if (fromCfDoor.has(req)) return json({ error: "Cloudflare settings change only on this computer or over your tailnet.", code: "local_only" }, 403);
         const answer = await cfRoutes?.handle(req, path);
+        if (answer) return answer;
+      }
+      // The sign-in card (inbox-auth-routes.ts). A request the door forwarded is refused here rather than
+      // at the door's own path list, so the card can answer with its one line instead of a bare 403:
+      // the person signed in at the door is already inside, and closing it from in there locks the next
+      // person out.
+      if (path === AUTH_ROUTE || path.startsWith(`${AUTH_ROUTE}/`)) {
+        const refusal = refuseDoorOrigin(req, json);
+        if (refusal) return refusal;
+        const answer = await authRoutes?.handle(req, path);
         if (answer) return answer;
       }
       if (path === "/api/inbox/health" && req.method === "GET") {
@@ -8837,6 +8850,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     note: debugLog ? (event, data) => debugLog.note(event, data) : undefined,
   });
   authDoor.start();
+  authRoutes = createAuthRoutes({ dataDir, door: authDoor, json, readBody });
   cfRoutes = createCfAccessRoutes({
     dataDir,
     door: cfAccess,

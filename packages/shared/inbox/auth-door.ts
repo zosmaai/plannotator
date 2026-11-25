@@ -168,3 +168,26 @@ export function withoutAuthCookies(value: string): string {
 export function authCookieName(secure: boolean): string {
   return `${secure ? "__Secure-" : ""}${AUTH_COOKIE_PREFIX}.session_token`;
 }
+
+/**
+ * Requests the sign-in door handed on, remembered by the request object itself. Nothing about the
+ * request says it: by the time the Inbox answers, the door's headers are scrubbed and the address it
+ * came from is the machine's own loopback, so the only honest mark is one the door leaves on the
+ * object it forwards.
+ */
+const fromAuthDoor = new WeakSet<Request>();
+
+/** Say that this request arrived through the sign-in door. The door calls this on everything it hands on. */
+export function markFromAuthDoor(req: Request): void {
+  fromAuthDoor.add(req);
+}
+
+/**
+ * Did this request come in through the sign-in door? The settings for the door itself are answered
+ * with no on every route, so a signed-in stranger could otherwise reach them; this is what tells the
+ * Inbox that the person asking is already inside the room the door guards, and that closing it from
+ * in there would lock the next person out.
+ */
+export function cameFromAuthDoor(req: Request): boolean {
+  return fromAuthDoor.has(req);
+}
