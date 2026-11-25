@@ -5,17 +5,17 @@
  * precedent for a card that changes how the Inbox can be reached: one GET that answers what the door
  * is and what it would take to change it, and POSTs named after the buttons.
  *
- * Why this card is not behind a session. The Access card's writes are open to an anonymous request
- * on the main listener on purpose: to turn the door on from the tailnet you have to be on the
- * tailnet and not signed in at a door that does not exist yet. The main listener is the tailnet (or
- * this computer), so that is the trust the card already runs on — and turning the Access card on
- * publishes an Inbox to the internet, which is a wider step than this card can take. What this card
- * must not do is answer to someone who got in by signing at the door: that person would be changing
- * the accounts and the allow list of the door that let them in, and turning it off from inside locks
- * the next person out — the same reason `bridge` is `local_only`. So `inbox.ts` refuses a request the
- * door forwarded (`cameFromAuthDoor`), and the card says to change this on the computer itself or
- * over the tailnet. Gating this card with sessions as well would close the tailnet path the Access
- * card depends on, so it does not happen here; said in `adr/implementation/inbox-auth.md`.
+ * Who may change it: the Inbox's owner, and nobody else. Not a session — the owner is where the Inbox
+ * runs, so a request that came in through a door is the one that is not them. Both doors are refused:
+ * the sign-in door (`cameFromAuthDoor`), because a person who got in by signing must not change the
+ * accounts and the allow list of the door that let them in, and turning it off from inside locks the
+ * next person out — the same reason `bridge` is `local_only`; and Cloudflare Access, because Access
+ * admits a whole team, and a teammate is not the person who owns this Inbox. The Access card already
+ * refuses its own door that way (`fromCfDoor` in `inbox.ts`), so this card answers the same question
+ * the same way. What is left is this computer and the owner's tailnet, which is what the Access card's
+ * writes run on too: to open a door at all you have to be somewhere that is not that door. Gating
+ * this card with sessions instead would close the tailnet path the Access card depends on, so it does
+ * not happen here; said in `adr/implementation/inbox-auth.md`.
  */
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
 import { existsSync } from "node:fs";
@@ -88,14 +88,19 @@ interface Refusal {
 }
 
 /**
- * The mount's one rule, kept where it can be tested: a request that came in through the sign-in door
- * does not get to change the door. It is the only card in Settings whose subject is the lock on the
- * room, and a sign-in that could close the door behind it would leave the next person outside — the
- * same reason `bridge` is `local_only`. Asked from the computer itself or over a tailnet it works.
+ * The mount's one rule, kept where it can be tested: the owner changes how you get in, and a request
+ * that arrived through a door did not. `fromAccessDoor` is the mount's own knowledge — Cloudflare
+ * Access puts its own mark on what it forwards, and only `inbox.ts` can see it — so both answers come
+ * in here rather than as two separate 403s that would drift apart. Asked from the computer itself or
+ * over the owner's tailnet, neither flag is set and the card works.
  */
-export function refuseDoorOrigin(req: Request, json: (data: unknown, status?: number) => Response): Response | null {
-  if (!cameFromAuthDoor(req)) return null;
-  return json({ error: "The sign-in door cannot change itself. Change it on the computer itself or over your tailnet.", code: "local_only" } satisfies Refusal, 403);
+export function refuseDoorOrigin(
+  req: Request,
+  json: (data: unknown, status?: number) => Response,
+  fromAccessDoor = false,
+): Response | null {
+  if (!cameFromAuthDoor(req) && !fromAccessDoor) return null;
+  return json({ error: "Only the Inbox's owner changes how you get in. Change this on the computer itself or over your tailnet.", code: "local_only" } satisfies Refusal, 403);
 }
 
 export function createAuthRoutes(context: AuthRouteContext) {

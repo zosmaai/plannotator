@@ -193,7 +193,7 @@ describe("the sign-in door", () => {
     });
     expect(answer.status).toBe(403);
     expect(await answer.json()).toEqual({
-      error: "The sign-in door cannot change itself. Change it on the computer itself or over your tailnet.",
+      error: "Only the Inbox's owner changes how you get in. Change this on the computer itself or over your tailnet.",
       code: "local_only",
     });
   }, 30_000);

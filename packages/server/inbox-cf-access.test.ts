@@ -171,6 +171,23 @@ describe("the Inbox through Cloudflare Access", () => {
     expect(await asset.text()).toBe("console.log('session asset');");
   });
 
+  test("a person signed in through Cloudflare cannot change the sign-in door either", async () => {
+    const { inbox, door } = await start();
+    // The sign-in card answers the main listener only. A request that arrived through Access carries
+    // Access's own mark, and that mark is the whole answer: Access admits a team, and a teammate is not
+    // the person who owns this Inbox, so they cannot add an account to it or take its allow list away.
+    const read = await fetch(`${door}/api/inbox/sign-in`, { headers: await owner() });
+    expect([read.status, ((await read.json()) as { code: string }).code]).toEqual([403, "local_only"]);
+    for (const action of ["on", "off", "allow", "account", "account/remove"]) {
+      const write = await fetch(`${door}/api/inbox/sign-in/${action}`, {
+        method: "POST",
+        headers: { ...(await owner()), "Content-Type": "application/json", Origin: `https://${TEST_HOST}` },
+        body: JSON.stringify({ on: false, host: TEST_HOST, allow: [TEST_OWNER], serverSession: inbox.serverSession }),
+      });
+      expect([action, write.status]).toEqual([action, 403]);
+    }
+  });
+
   test("a person signed in through Cloudflare cannot change the Cloudflare settings", async () => {
     const { inbox, door } = await start();
     const read = await fetch(`${door}/api/inbox/cloudflare-access`, { headers: await owner() });
