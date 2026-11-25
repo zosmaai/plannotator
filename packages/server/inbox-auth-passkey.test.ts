@@ -439,6 +439,27 @@ describe("passkeys at the sign-in door", () => {
     expect((await call.json()).code).toBe("account_not_allowed");
   }, 60_000);
 
+  test("removing a passkey is refused from another site", async () => {
+    await seed(ME);
+    const { base } = await startWithAccounts();
+    const jar = await signInJar(base, ME);
+    expect((await registerPasskey(base, jar, makeFixtureKey(), "Pixel laptop")).status).toBe(200);
+    const [only] = listed((await listPasskeys(base, jar.header)).body);
+
+    // A page on another site can make the browser send its cookies; it cannot make its Origin ours.
+    const crossed = await request(`${base}/api/inbox/auth/passkeys/remove`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://evil.example.net", cookie: jar.header },
+      body: JSON.stringify({ id: String(only.id) }),
+    });
+    expect(crossed.status).toBe(403);
+    expect(((await crossed.json()) as { code: string }).code).toBe("forbidden_origin");
+    expect(await passkeyRows()).toHaveLength(1);
+
+    // The door's own page removes it, and its Origin is the door's.
+    expect((await removePasskey(base, jar.header, String(only.id))).status).toBe(200);
+  }, 60_000);
+
   test("a removed passkey stops signing in", async () => {
     const { base } = await startWithAccounts();
     await seed(ME);
