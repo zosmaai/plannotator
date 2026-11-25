@@ -18,6 +18,7 @@ import { randomBytes } from "node:crypto";
 import { betterAuth } from "better-auth";
 import { getMigrations } from "better-auth/db/migration";
 import { hashPassword } from "better-auth/crypto";
+import { passkey } from "@better-auth/passkey";
 import { AUTH_COOKIE_PREFIX, INBOX_AUTH_SECRET_ENV, isAllowedAuthEmail, normalizeAuthEmail } from "@plannotator/shared/inbox/auth-door";
 
 /** Seven days, the page's own promise. */
@@ -45,9 +46,22 @@ export interface InboxAuthInstanceOptions {
   allow?: readonly string[];
   /** For tests and the door's own note: how many sign-in attempts an hour, per address. */
   databaseFile?: string;
+  /**
+   * What the browser is asked to sign for: the site a passkey is minted for. Both default to
+   * `baseUrl`, which is what they must be for a door reached at its own name; a proxy that ends TLS
+   * somewhere else is the only reason to say otherwise.
+   */
+  webauthn?: { rpID?: string; origin?: string };
 }
 
 export interface InboxAuth { email: string; name: string; createdAt: string; lastSeenAt: string | null }
+
+/**
+ * A passkey as the door's page sees it: what to show and what to remove. Not the key, not the
+ * credential id — the page has no use for either, and a browser should not be handed a stored
+ * credential to present as if its authenticator held it.
+ */
+export interface InboxPasskey { id: string; name: string; createdAt: string; deviceType: string; backedUp: boolean }
 
 export interface InboxAuthAccount {
   email: string;
@@ -68,6 +82,13 @@ export interface InboxAuthInstance {
   remove: (email: string) => Promise<{ removed: boolean }>;
   /** The sessions of an address, ended: used when its account leaves or its password changes. */
   revokeSessions: (email: string) => Promise<number>;
+  /** A user's passkeys, oldest first. */
+  passkeys: (userId: string) => Promise<InboxPasskey[]>;
+  /**
+   * Remove one of a user's passkeys. Refuses the last one of an account that has no password: the
+   * door would otherwise be the way an account locks its own owner out.
+   */
+  removePasskey: (userId: string, id: string) => Promise<{ removed: boolean; code?: string; message?: string }>;
   close: () => void;
 }
 
@@ -92,11 +113,15 @@ export async function openInboxAuth(options: InboxAuthInstanceOptions): Promise<
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
   const secret = options.secret ?? (process.env[INBOX_AUTH_SECRET_ENV]?.trim() || readSecret(options.dataDir));
 
+  const rpID = options.webauthn?.rpID ?? new URL(options.baseUrl).hostname;
+  const passkeyOrigin = options.webauthn?.origin ?? options.baseUrl;
+  const trustedOrigins = passkeyOrigin === options.baseUrl ? [options.baseUrl] : [options.baseUrl, passkeyOrigin];
+
   const auth = betterAuth({
     database: db,
     baseURL: options.baseUrl,
     secret,
-    trustedOrigins: [options.baseUrl],
+    trustedOrigins,
     emailAndPassword: { enabled: true, disableSignUp: true, minPasswordLength: AUTH_MIN_PASSWORD_LENGTH },
     session: { expiresIn: AUTH_SESSION_SECONDS, updateAge: 24 * 60 * 60 },
     /**
@@ -117,6 +142,11 @@ export async function openInboxAuth(options: InboxAuthInstanceOptions): Promise<
       defaultCookieAttributes: { httpOnly: true, sameSite: "lax", secure: true, path: "/" },
       ipAddress: { ipAddressHeaders: ["cf-connecting-ip", "x-forwarded-for"] },
     },
+    // Passkeys live on the same account and the same session as the password, so a passkey sign-in
+    // gets the door's session by the same door and the allowlist refuses it the same way. Adding one
+    // needs a session (`requireSession`, the plugin's default): an account is only given a passkey by
+    // someone already through this door, and this plugin version has no password step of its own.
+    plugins: [passkey({ rpID, rpName: "Plannotator Inbox", origin: passkeyOrigin })],
     telemetry: { enabled: false },
   } as Parameters<typeof betterAuth>[0]);
 
@@ -184,6 +214,43 @@ export async function openInboxAuth(options: InboxAuthInstanceOptions): Promise<
     return { created: true };
   };
 
+  /** Raw `passkey` rows of one account. The `id` is the door's own; `credentialID` is the browser's. */
+  const passkeyRows = async (userId: string): Promise<Record<string, unknown>[]> => {
+    const ctx = await context();
+    const rows = (await ctx.adapter.findMany({
+      model: "passkey",
+      where: [{ field: "userId", value: userId }],
+    })) as unknown as Record<string, unknown>[];
+    return rows.sort((a, b) => String(a.createdAt ?? "").localeCompare(String(b.createdAt ?? "")));
+  };
+
+  const passkeys = async (userId: string): Promise<InboxPasskey[]> =>
+    (await passkeyRows(userId)).map((row) => ({
+      id: String(row.id ?? ""),
+      name: String(row.name ?? "") || "Passkey",
+      createdAt: new Date(String(row.createdAt ?? 0)).toISOString(),
+      deviceType: String(row.deviceType ?? ""),
+      backedUp: row.backedUp === true,
+    }));
+
+  /** Whether this account can still get in without a passkey: it has a password. */
+  const hasPassword = async (userId: string): Promise<boolean> => {
+    const ctx = await context();
+    const credential = await ctx.internalAdapter.findCredentialAccount(userId);
+    return Boolean(credential?.password);
+  };
+
+  const removePasskey = async (userId: string, id: string): Promise<{ removed: boolean; code?: string; message?: string }> => {
+    const rows = await passkeyRows(userId);
+    if (!rows.some((row) => String(row.id) === id)) return { removed: false, code: "not_here", message: "That passkey is not on your account." };
+    if (rows.length === 1 && !(await hasPassword(userId))) {
+      return { removed: false, code: "last_way_in", message: "That is the only way into this account. Add another way in first." };
+    }
+    const ctx = await context();
+    await ctx.adapter.deleteMany({ model: "passkey", where: [{ field: "userId", value: userId }, { field: "id", value: id }] });
+    return { removed: true };
+  };
+
   const remove = async (email: string): Promise<{ removed: boolean }> => {
     const found = await findByEmail(email);
     if (!found) return { removed: false };
@@ -202,6 +269,8 @@ export async function openInboxAuth(options: InboxAuthInstanceOptions): Promise<
     set,
     remove,
     revokeSessions,
+    passkeys,
+    removePasskey,
     close: () => {
       try {
         db.close();

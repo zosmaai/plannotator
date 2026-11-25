@@ -9,13 +9,17 @@
  * connection route, no device door).
  *
  * Order, on every request:
- *  1. The door's own paths: `/login` and its two assets, and `/api/auth/*`
- *     (better-auth's own routes: sign-in, sign-out, session).
+ *  1. The door's own paths: `/login` and its assets (`/auth.css`, `/auth.js`,
+ *     `/passkeys.js`), and `/api/auth/*` (better-auth's own routes: sign-in,
+ *     sign-out, session, and the passkey ceremonies).
  *  2. A session, read from the cookie this door set. None: a page is sent to
  *     `/login?next=…`, an API call answers `401 auth_required`.
- *  3. The session's address is on the allowlist. Not: `403 account_not_allowed`,
+ *  3. The session's address is on the allowlist. Not: `401 account_not_allowed`,
  *     and the page says whose Inbox this is.
- *  4. The request, its own cookies dropped, to the window.
+ *  4. Passkeys, which need that session: the door's `/passkeys` page and the two
+ *     calls behind it. They answer for the session's account and never hand a
+ *     stored key back.
+ *  5. The request, its own cookies dropped, to the window.
  *
  * A few paths are never handed on whatever the session: `/mcp` and the
  * connection routes are refused here, as they are at the tailnet's listener.
@@ -27,12 +31,15 @@ import {
   AUTH_BASE_PATH,
   AUTH_LOGIN_PATH,
   markFromAuthDoor,
+  PASSKEY_API_PATH,
+  PASSKEY_JS_PATH,
+  PASSKEY_PAGE_PATH,
   resolveInboxAuth,
   safeNextPath,
   withoutAuthCookies,
   type InboxAuthSettings,
 } from "@plannotator/shared/inbox/auth-door";
-import { AUTH_CSS, AUTH_CSP, AUTH_JS, loginPageHtml } from "./inbox-auth-login";
+import { AUTH_CSS, AUTH_CSP, AUTH_JS, loginPageHtml, passkeyPageHtml, PASSKEY_JS } from "./inbox-auth-login";
 import { openInboxAuth, sessionUser, type InboxAuthInstance } from "./inbox-auth-instance";
 
 export interface InboxAuthDoorState {
@@ -66,6 +73,13 @@ const CLOSED = [
   // A launched session's permission hook (`inbox-launch-claude-permission.ts`): an agent's route, not a person's.
   /^\/api\/inbox\/launch\/[^/]+\/permission$/,
 ];
+
+function jsonBody(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { ...HEADERS, "Content-Type": "application/json; charset=utf-8" },
+  });
+}
 
 function jsonError(status: number, code: string, message: string): Response {
   return new Response(JSON.stringify({ error: message, code }), { status, headers: { ...HEADERS, "Content-Type": "application/json; charset=utf-8" } });
@@ -175,6 +189,7 @@ export function createInboxAuthDoor(context: InboxAuthDoorContext) {
     }
     if (path === "/auth.css") return textResponse(AUTH_CSS, 200, "text/css; charset=utf-8");
     if (path === "/auth.js") return textResponse(AUTH_JS, 200, "text/javascript; charset=utf-8");
+    if (path === PASSKEY_JS_PATH) return textResponse(PASSKEY_JS, 200, "text/javascript; charset=utf-8");
     if (path === AUTH_BASE_PATH || path.startsWith(`${AUTH_BASE_PATH}/`)) {
       const answer = await auth.auth.handler(req);
       const out = new Headers(answer.headers);
@@ -201,10 +216,33 @@ export function createInboxAuthDoor(context: InboxAuthDoorContext) {
       return textResponse(anySession ? "That account is not allowed into this Inbox.\n" : "Sign in to this Inbox.\n", anySession ? 403 : 401, "text/plain; charset=utf-8");
     }
 
-    // 3. What the door never hands on.
+    // 3. Passkeys, after the session: the door's own page and the two calls it makes. They answer for
+    // the session's account by reading the session and nothing from the request, so a call cannot name
+    // whose passkeys it wants, and they never hand a stored key back — only a name, a date and the
+    // door's own row id.
+    if (path === PASSKEY_PAGE_PATH || path === `${PASSKEY_PAGE_PATH}/`) {
+      if (req.method !== "GET" && req.method !== "HEAD") return jsonError(405, "method_not_allowed", "Passkeys are managed from their page.");
+      const page = passkeyPageHtml({ host: active.host, next: safeNextPath(url.searchParams.get("next")) });
+      return textResponse(req.method === "HEAD" ? "" : page, 200, "text/html; charset=utf-8", { "Content-Security-Policy": AUTH_CSP, "Referrer-Policy": "no-referrer" });
+    }
+    if (path === PASSKEY_API_PATH) {
+      if (req.method !== "GET" && req.method !== "HEAD") return jsonError(405, "method_not_allowed", "Read the list with GET.");
+      return jsonBody({ passkeys: await auth.passkeys(signed.id) });
+    }
+    if (path === `${PASSKEY_API_PATH}/remove`) {
+      if (req.method !== "POST") return jsonError(405, "method_not_allowed", "Remove a passkey with POST.");
+      const asked = (await req.json().catch(() => null)) as { id?: unknown } | null;
+      const id = typeof asked?.id === "string" ? asked.id : "";
+      if (!id) return jsonError(400, "bad_request", "Say which passkey to remove.");
+      const answer = await auth.removePasskey(signed.id, id);
+      if (!answer.removed) return jsonError(answer.code === "last_way_in" ? 409 : 404, answer.code ?? "not_here", answer.message ?? "That passkey is not on your account.");
+      return jsonBody({ removed: true });
+    }
+
+    // 4. What the door never hands on.
     if (CLOSED.some((pattern) => pattern.test(path))) return jsonError(403, "local_only", "That route is for this computer only.");
 
-    // 4. The window. Marked on the object handed on, because nothing about the request says where it
+    // 5. The window. Marked on the object handed on, because nothing about the request says where it
     // came from by then: its door headers are scrubbed and its address is this machine's own loopback.
     // The sign-in settings are answered on every route, and this is what lets the Inbox refuse to let
     // someone who signed in at the door change that door.
@@ -236,7 +274,16 @@ export function createInboxAuthDoor(context: InboxAuthDoorContext) {
     void (async () => {
       let made: InboxAuthInstance;
       try {
-        made = context.instance ? await context.instance() : await openInboxAuth({ dataDir: context.dataDir, baseUrl: active.baseUrl, allow: active.allow });
+        // A passkey is minted for the name the browser sees, which is the door's own host and not the
+        // loopback address behind it — the same host the door answers its `Host` check with.
+        made = context.instance
+          ? await context.instance()
+          : await openInboxAuth({
+              dataDir: context.dataDir,
+              baseUrl: active.baseUrl,
+              allow: active.allow,
+              webauthn: { rpID: active.host, origin: active.baseUrl },
+            });
       } catch (error) {
         if (mine === generation) fail(`Could not open the accounts in ${context.dataDir}: ${error instanceof Error ? error.message : String(error)}`);
         return;

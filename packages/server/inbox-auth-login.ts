@@ -32,6 +32,18 @@ export interface LoginPageOptions {
   error?: string | null;
 }
 
+/**
+ * Passkeys at the door are managed on the door's own page, not in the Inbox's settings: a passkey is
+ * another way through this door, and a person who is not signed in cannot reach the Inbox at all.
+ */
+export interface PasskeyPageOptions {
+  host: string;
+  /** Where the page's own links go back to: already through `safeNextPath`. */
+  next: string;
+}
+
+const PASSKEY_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="4"/><path d="M12 12l7 7"/><path d="M16 16l2-2"/></svg>';
+
 export function loginPageHtml(options: LoginPageOptions): string {
   const error = options.error ? `<p class="auth-error" role="alert">${escapeHtml(options.error)}</p>` : `<p class="auth-error" role="alert" hidden></p>`;
   return `<!doctype html>
@@ -60,8 +72,48 @@ export function loginPageHtml(options: LoginPageOptions): string {
     ${error}
     <button type="submit" id="auth-submit">Sign in</button>
   </form>
+  <div class="auth-or"><span>or</span></div>
+  <button type="button" id="auth-passkey" class="auth-alt">${PASSKEY_ICON}Sign in with a passkey</button>
+  <p class="auth-error" id="auth-passkey-error" role="alert" hidden></p>
   <p class="auth-foot">Nobody else can open this Inbox. Your session lasts seven days, then asks again.</p>
   <noscript><p class="auth-error">This page needs JavaScript to sign in.</p></noscript>
+</main>
+</body>
+</html>
+`;
+}
+
+export function passkeyPageHtml(options: PasskeyPageOptions): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Passkeys · Plannotator</title>
+<link rel="stylesheet" href="/auth.css">
+<script src="/auth.js" defer></script>
+<script src="/passkeys.js" defer></script>
+</head>
+<body>
+<main class="auth-card auth-card-wide">
+  <div class="auth-mark" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="4"/><path d="M12 12l7 7"/><path d="M16 16l2-2"/></svg>
+  </div>
+  <h1>Passkeys for this Inbox</h1>
+  <p class="auth-lede">A passkey signs you in to <strong>${escapeHtml(options.host)}</strong> with your fingerprint, your face or a security key, instead of your password.</p>
+  <ul class="auth-list" id="passkey-list" aria-live="polite"></ul>
+  <p class="auth-empty" id="passkey-empty" hidden>No passkeys yet. Add one from this device, then sign in with it next time.</p>
+  <p class="auth-error" id="passkey-error" role="alert" hidden></p>
+  <form id="passkey-add" class="auth-add">
+    <label for="passkey-name">Name this passkey</label>
+    <div class="auth-row">
+      <input id="passkey-name" name="name" type="text" autocomplete="off" spellcheck="false" maxlength="64" placeholder="This laptop">
+      <button type="submit" id="passkey-add-submit">Add a passkey</button>
+    </div>
+  </form>
+  <p class="auth-foot">Your last passkey stays while your account has no password. Keep your password too, or add a second device, so losing one is not losing the Inbox.</p>
+  <p class="auth-foot"><a id="passkey-back" href="${escapeHtml(options.next)}">Back to your Inbox</a></p>
 </main>
 </body>
 </html>
@@ -166,14 +218,244 @@ button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 button:disabled { opacity: 0.6; cursor: progress; }
 .auth-error { margin: 4px 0 0; font-size: 0.8125rem; line-height: 1.45; color: var(--destructive); }
 .auth-foot { margin: 18px 0 0; font-size: 0.6875rem; line-height: 1.5; color: var(--muted); }
+.auth-foot a { color: var(--primary); text-decoration: none; }
+.auth-foot a:hover { text-decoration: underline; }
+.auth-or { display: flex; align-items: center; gap: 10px; margin: 16px 0 12px; color: var(--muted); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.auth-or::before, .auth-or::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+button.auth-alt {
+  margin-top: 0;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--border);
+}
+button.auth-alt:hover:not(:disabled) { filter: none; background: var(--input); }
+button.auth-alt svg { flex: none; opacity: 0.8; }
+.auth-card-wide { max-width: 460px; }
+.auth-list { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 8px; }
+.auth-list li {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 12px;
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.auth-list .auth-key-name { font-size: 0.875rem; }
+.auth-list .auth-key-meta { display: block; margin-top: 2px; font-size: 0.6875rem; color: var(--muted); }
+button.auth-remove {
+  margin: 0; padding: 6px 10px;
+  font-size: 0.75rem;
+  color: var(--destructive);
+  background: transparent;
+  border: 1px solid color-mix(in oklch, var(--destructive) 45%, transparent);
+}
+button.auth-remove:hover:not(:disabled) { filter: none; background: color-mix(in oklch, var(--destructive) 12%, transparent); }
+.auth-empty { margin: 16px 0 0; font-size: 0.8125rem; line-height: 1.5; color: var(--muted); }
+.auth-add { margin-top: 16px; }
+.auth-row { display: flex; gap: 8px; }
+.auth-row input { flex: 1; min-width: 0; }
+.auth-row button { margin-top: 0; white-space: nowrap; }
+input[type="text"] {
+  width: 100%;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 0.875rem;
+  color: var(--fg);
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  outline: none;
+}
+input[type="text"]:focus-visible { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 25%, transparent); }
 `;
 
 export const AUTH_JS = `(function () {
+  // The door's own script. Nothing is bundled and nothing comes from a CDN — the page's CSP names
+  // 'self' only — so the conversions a WebAuthn answer needs are written out here: base64url strings,
+  // which better-auth speaks, and the ArrayBuffers a browser hands back.
+  var door = {};
+
+  function toBuffer(value) {
+    var text = String(value).replace(/-/g, "+").replace(/_/g, "/");
+    while (text.length % 4) text += "=";
+    var raw = atob(text);
+    var bytes = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
+    return bytes.buffer;
+  }
+
+  function toBase64url(buffer) {
+    var bytes = new Uint8Array(buffer);
+    var text = "";
+    for (var i = 0; i < bytes.length; i += 1) text += String.fromCharCode(bytes[i]);
+    return btoa(text).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+  }
+
+  function failure(body) {
+    var code = body && (body.code || body.message);
+    var error = new Error(code || "request_failed");
+    error.name = code || "request_failed";
+    return error;
+  }
+
+  function ask(path) {
+    return fetch(path, { credentials: "same-origin" }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (body) {
+        if (!res.ok) throw failure(body);
+        return body;
+      });
+    });
+  }
+
+  function post(path, body) {
+    return fetch(path, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (parsed) { return { res: res, body: parsed }; });
+    });
+  }
+
+  function allowed(list) {
+    if (!list || !list.length) return undefined;
+    return list.map(function (entry) {
+      return { type: entry.type || "public-key", id: toBuffer(entry.id), transports: entry.transports };
+    });
+  }
+
+  function registration(credential) {
+    var answer = credential.response;
+    return {
+      id: credential.id,
+      rawId: toBase64url(credential.rawId),
+      type: credential.type,
+      authenticatorAttachment: credential.authenticatorAttachment || undefined,
+      clientExtensionResults: credential.getClientExtensionResults ? credential.getClientExtensionResults() : {},
+      response: {
+        clientDataJSON: toBase64url(answer.clientDataJSON),
+        attestationObject: toBase64url(answer.attestationObject),
+        transports: answer.getTransports ? answer.getTransports() : undefined,
+      },
+    };
+  }
+
+  function assertion(credential) {
+    var answer = credential.response;
+    return {
+      id: credential.id,
+      rawId: toBase64url(credential.rawId),
+      type: credential.type,
+      authenticatorAttachment: credential.authenticatorAttachment || undefined,
+      clientExtensionResults: credential.getClientExtensionResults ? credential.getClientExtensionResults() : {},
+      response: {
+        clientDataJSON: toBase64url(answer.clientDataJSON),
+        authenticatorData: toBase64url(answer.authenticatorData),
+        signature: toBase64url(answer.signature),
+        userHandle: answer.userHandle ? toBase64url(answer.userHandle) : undefined,
+      },
+    };
+  }
+
+  /** A passkey sign-in: the options better-auth hands out, the browser's own prompt, the answer back. */
+  door.signIn = function () {
+    return ask("/api/auth/passkey/generate-authenticate-options")
+      .then(function (options) {
+        return navigator.credentials.get({
+          publicKey: {
+            challenge: toBuffer(options.challenge),
+            rpId: options.rpId,
+            timeout: options.timeout,
+            userVerification: options.userVerification,
+            allowCredentials: allowed(options.allowCredentials),
+          },
+        });
+      })
+      .then(function (credential) {
+        return post("/api/auth/passkey/verify-authentication", { response: assertion(credential) });
+      });
+  };
+
+  /** A new passkey for the session's own account: the same three steps, in the other direction. */
+  door.add = function (name) {
+    return ask("/api/auth/passkey/generate-register-options")
+      .then(function (options) {
+        return navigator.credentials.create({
+          publicKey: {
+            challenge: toBuffer(options.challenge),
+            rp: options.rp,
+            user: { id: toBuffer(options.user.id), name: options.user.name, displayName: options.user.displayName || options.user.name },
+            pubKeyCredParams: options.pubKeyCredParams,
+            timeout: options.timeout,
+            attestation: options.attestation,
+            authenticatorSelection: options.authenticatorSelection,
+            excludeCredentials: allowed(options.excludeCredentials),
+            extensions: options.extensions,
+          },
+        });
+      })
+      .then(function (credential) {
+        return post("/api/auth/passkey/verify-registration", { response: registration(credential), name: name });
+      });
+  };
+
+  door.list = function () {
+    return ask("/api/inbox/auth/passkeys");
+  };
+
+  door.remove = function (id) {
+    return post("/api/inbox/auth/passkeys/remove", { id: id });
+  };
+
+  /** What to tell the person when a ceremony does not finish. */
+  door.explain = function (error) {
+    var name = (error && (error.name || error.message)) || "";
+    if (name === "NotAllowedError") return "No passkey was used. Try again, or sign in with your password.";
+    if (name === "InvalidStateError") return "This device already holds a passkey for this Inbox.";
+    if (name === "SecurityError") return "This browser will not use passkeys on this address.";
+    if (name === "UNAUTHORIZED" || name === "AUTHENTICATION_FAILED") return "That passkey was not accepted here.";
+    if (name === "not_here" || name === "last_way_in") return String(error.message || "That passkey cannot be removed.");
+    if (name === "request_failed" || name === "TypeError") return "Could not reach the Inbox. Check your connection and try again.";
+    return "Something went wrong: " + (name || "unknown error") + ".";
+  };
+
+  window.PlannotatorDoor = door;
+
+  // The sign-in page: the password form, and the passkey button beside it. A passkey is offered
+  // beside the password rather than instead of it — an account with no passkey, on a device that
+  // cannot make one, still signs in.
   var form = document.getElementById("auth-form");
+  var passkeyButton = document.getElementById("auth-passkey");
+  var passkeyError = document.getElementById("auth-passkey-error");
+  var next = document.querySelector('input[name="next"]');
+  var target = function () { return next && next.value ? next.value : "/"; };
+
+  if (passkeyButton) {
+    passkeyButton.addEventListener("click", function () {
+      passkeyButton.disabled = true;
+      if (passkeyError) { passkeyError.textContent = ""; passkeyError.hidden = true; }
+      door.signIn()
+        .then(function (answer) {
+          if (answer && answer.res && answer.res.ok) { location.replace(target()); return; }
+          var code = answer && answer.body ? answer.body.code || answer.body.message : "";
+          if (passkeyError) {
+            passkeyError.textContent = code === "UNAUTHORIZED" || code === "AUTHENTICATION_FAILED" ? "That passkey was not accepted here." : "Could not sign in with a passkey. Try again, or use your password.";
+            passkeyError.hidden = false;
+          }
+          passkeyButton.disabled = false;
+        })
+        .catch(function (error) {
+          if (passkeyError) { passkeyError.textContent = door.explain(error); passkeyError.hidden = false; }
+          passkeyButton.disabled = false;
+        });
+    });
+  }
+
   if (!form) return;
   var email = document.getElementById("email");
   var password = document.getElementById("password");
-  var next = form.querySelector('input[name="next"]');
   var submit = document.getElementById("auth-submit");
   var line = form.querySelector(".auth-error");
   var label = submit ? submit.textContent : "Sign in";
@@ -192,22 +474,15 @@ export const AUTH_JS = `(function () {
       return;
     }
     if (submit) { submit.disabled = true; submit.textContent = "Signing in…"; }
-    fetch("/api/auth/sign-in/email", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email: email.value.trim(), password: password.value }),
-    })
-      .then(function (res) {
-        return res.json().catch(function () { return {}; }).then(function (body) { return { res: res, body: body }; });
-      })
+    post("/api/auth/sign-in/email", { email: email.value.trim(), password: password.value })
       .then(function (answer) {
         if (answer.res.ok) {
-          location.replace(next && next.value ? next.value : "/");
+          location.replace(target());
           return;
         }
         var code = answer.body && (answer.body.code || answer.body.message);
-        show(code === "INVALID_EMAIL_OR_PASSWORD" ? "That e-mail and password do not match." : code === "EMAIL_NOT_VERIFIED" ? "That e-mail is not verified yet. Ask the Inbox's owner to verify it." : "Could not sign in. Try again in a moment.");
+        var tooMany = answer.res.status === 429 || code === "TOO_MANY_REQUESTS" || code === "RATE_LIMITED";
+        show(code === "INVALID_EMAIL_OR_PASSWORD" ? "That e-mail and password do not match." : tooMany ? "Too many tries. Wait a few minutes, then try again." : code === "EMAIL_NOT_VERIFIED" ? "That e-mail is not verified yet. Ask the Inbox's owner to verify it." : "Could not sign in. Try again in a moment.");
         if (submit) { submit.disabled = false; submit.textContent = label; }
         password.value = "";
         password.focus();
@@ -217,5 +492,101 @@ export const AUTH_JS = `(function () {
         if (submit) { submit.disabled = false; submit.textContent = label; }
       });
   });
+})();
+`;
+
+export const PASSKEY_JS = `(function () {
+  // The passkeys page: what this account holds, adding one from this device, removing one. Every call
+  // goes to the door's own endpoints, which answer for the session's account and nobody else's.
+  var door = window.PlannotatorDoor;
+  if (!door) return;
+  var list = document.getElementById("passkey-list");
+  var empty = document.getElementById("passkey-empty");
+  var line = document.getElementById("passkey-error");
+  var form = document.getElementById("passkey-add");
+  var name = document.getElementById("passkey-name");
+  var addButton = document.getElementById("passkey-add-submit");
+
+  function show(message) {
+    if (!line) return;
+    line.textContent = message;
+    line.hidden = !message;
+  }
+
+  function meta(key) {
+    var parts = [];
+    var when = key.createdAt ? new Date(key.createdAt) : null;
+    if (when && !isNaN(when.getTime())) parts.push("added " + when.toLocaleDateString());
+    parts.push(key.backedUp ? "synced across your devices" : "on this device");
+    return parts.join(" · ");
+  }
+
+  function row(key) {
+    var item = document.createElement("li");
+    var box = document.createElement("div");
+    var label = document.createElement("span");
+    label.className = "auth-key-name";
+    label.textContent = key.name || "Passkey";
+    var sub = document.createElement("span");
+    sub.className = "auth-key-meta";
+    sub.textContent = meta(key);
+    box.appendChild(label);
+    box.appendChild(sub);
+    var remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "auth-remove";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", function () {
+      remove.disabled = true;
+      show("");
+      door.remove(key.id)
+        .then(function (answer) {
+          if (answer && answer.res && answer.res.ok) { load(); return; }
+          show(answer && answer.body && answer.body.error ? answer.body.error : "Could not remove that passkey.");
+          remove.disabled = false;
+        })
+        .catch(function (error) { show(door.explain(error)); remove.disabled = false; });
+    });
+    item.appendChild(box);
+    item.appendChild(remove);
+    return item;
+  }
+
+  function load() {
+    door.list()
+      .then(function (body) {
+        var keys = (body && body.passkeys) || [];
+        if (list) {
+          list.textContent = "";
+          keys.forEach(function (key) { list.appendChild(row(key)); });
+        }
+        if (empty) empty.hidden = keys.length > 0;
+      })
+      .catch(function (error) { show(door.explain(error)); });
+  }
+
+  if (form) {
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      show("");
+      if (addButton) addButton.disabled = true;
+      door.add(name && name.value.trim() ? name.value.trim() : undefined)
+        .then(function (answer) {
+          if (answer && answer.res && answer.res.ok) {
+            if (name) name.value = "";
+            load();
+          } else {
+            show(answer && answer.body && answer.body.error ? answer.body.error : "Could not add that passkey.");
+          }
+          if (addButton) addButton.disabled = false;
+        })
+        .catch(function (error) {
+          show(door.explain(error));
+          if (addButton) addButton.disabled = false;
+        });
+    });
+  }
+
+  load();
 })();
 `;
