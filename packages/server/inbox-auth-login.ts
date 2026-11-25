@@ -481,7 +481,8 @@ export const AUTH_JS = `(function () {
           return;
         }
         var code = answer.body && (answer.body.code || answer.body.message);
-        show(code === "INVALID_EMAIL_OR_PASSWORD" ? "That e-mail and password do not match." : code === "EMAIL_NOT_VERIFIED" ? "That e-mail is not verified yet. Ask the Inbox's owner to verify it." : "Could not sign in. Try again in a moment.");
+        var tooMany = answer.res.status === 429 || code === "TOO_MANY_REQUESTS" || code === "RATE_LIMITED";
+        show(code === "INVALID_EMAIL_OR_PASSWORD" ? "That e-mail and password do not match." : tooMany ? "Too many tries. Wait a few minutes, then try again." : code === "EMAIL_NOT_VERIFIED" ? "That e-mail is not verified yet. Ask the Inbox's owner to verify it." : "Could not sign in. Try again in a moment.");
         if (submit) { submit.disabled = false; submit.textContent = label; }
         password.value = "";
         password.focus();
