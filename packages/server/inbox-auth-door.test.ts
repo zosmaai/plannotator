@@ -208,6 +208,8 @@ describe("the sign-in door", () => {
     expect(body).toContain('name="password"');
     expect(body).toContain(HOST);
     expect(body).toContain('name="next" value="/"');
+    // The page says, before anyone clicks, where a passkey does and does not work.
+    expect(body).toContain(`Passkeys need <strong>https://${HOST}</strong>. The password works everywhere.`);
   }, 30_000);
 
   test("a session's cookies stop at the door", () => {

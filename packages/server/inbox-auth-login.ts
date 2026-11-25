@@ -74,6 +74,7 @@ export function loginPageHtml(options: LoginPageOptions): string {
   </form>
   <div class="auth-or"><span>or</span></div>
   <button type="button" id="auth-passkey" class="auth-alt">${PASSKEY_ICON}Sign in with a passkey</button>
+  <p class="auth-foot" id="auth-passkey-note">Passkeys need <strong>https://${escapeHtml(options.host)}</strong>. The password works everywhere.</p>
   <p class="auth-error" id="auth-passkey-error" role="alert" hidden></p>
   <p class="auth-foot">Nobody else can open this Inbox. Your session lasts seven days, then asks again.</p>
   <noscript><p class="auth-error">This page needs JavaScript to sign in.</p></noscript>
@@ -112,7 +113,7 @@ export function passkeyPageHtml(options: PasskeyPageOptions): string {
       <button type="submit" id="passkey-add-submit">Add a passkey</button>
     </div>
   </form>
-  <p class="auth-foot">Your last passkey stays while your account has no password. Keep your password too, or add a second device, so losing one is not losing the Inbox.</p>
+  <p class="auth-foot">Losing the only passkey of an account with no password would lock it, so the door keeps the last one. Keep your password, or add a second passkey from another device.</p>
   <p class="auth-foot"><a id="passkey-back" href="${escapeHtml(options.next)}">Back to your Inbox</a></p>
 </main>
 </body>
@@ -409,6 +410,16 @@ export const AUTH_JS = `(function () {
     return post("/api/inbox/auth/passkeys/remove", { id: id });
   };
 
+  /** Whether this origin can run a passkey ceremony at all: WebAuthn is secure-context only, so on a
+   *  plain http address navigator.credentials is not there and the button would throw instead. */
+  function noWebauthn() {
+    return window.isSecureContext === false || !navigator.credentials;
+  }
+
+  function passkeyNeedsHttps() {
+    return "Passkeys need https://" + location.hostname + ". The password works everywhere.";
+  }
+
   /** What to tell the person when a ceremony does not finish. */
   door.explain = function (error) {
     var name = (error && (error.name || error.message)) || "";
@@ -416,7 +427,11 @@ export const AUTH_JS = `(function () {
     if (name === "InvalidStateError") return "This device already holds a passkey for this Inbox.";
     if (name === "SecurityError") return "This browser will not use passkeys on this address.";
     if (name === "UNAUTHORIZED" || name === "AUTHENTICATION_FAILED") return "That passkey was not accepted here.";
+    if (name === "SESSION_NOT_FRESH") return "Sign in again, then add your passkey.";
     if (name === "not_here" || name === "last_way_in") return String(error.message || "That passkey cannot be removed.");
+    // A TypeError here is usually a browser without WebAuthn, not a broken connection: the ceremony
+    // never started, so there is nothing to retry.
+    if (name === "TypeError" && noWebauthn()) return passkeyNeedsHttps();
     if (name === "request_failed" || name === "TypeError") return "Could not reach the Inbox. Check your connection and try again.";
     return "Something went wrong: " + (name || "unknown error") + ".";
   };
@@ -434,6 +449,11 @@ export const AUTH_JS = `(function () {
 
   if (passkeyButton) {
     passkeyButton.addEventListener("click", function () {
+      // Nothing to ask for on an address that cannot run a passkey: say why instead of throwing.
+      if (noWebauthn()) {
+        if (passkeyError) { passkeyError.textContent = passkeyNeedsHttps(); passkeyError.hidden = false; }
+        return;
+      }
       passkeyButton.disabled = true;
       if (passkeyError) { passkeyError.textContent = ""; passkeyError.hidden = true; }
       door.signIn()
@@ -576,7 +596,10 @@ export const PASSKEY_JS = `(function () {
             if (name) name.value = "";
             load();
           } else {
-            show(answer && answer.body && answer.body.error ? answer.body.error : "Could not add that passkey.");
+            var failed = (answer && answer.body) || {};
+            // The plugin's own refusal, which has an answer: sign in again and the ceremony works.
+            if (failed.code === "SESSION_NOT_FRESH") show(door.explain({ name: failed.code }));
+            else show(failed.error || "Could not add that passkey.");
           }
           if (addButton) addButton.disabled = false;
         })
