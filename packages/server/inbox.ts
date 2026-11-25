@@ -6426,12 +6426,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const answer = await cfRoutes?.handle(req, path);
         if (answer) return answer;
       }
-      // The sign-in card (inbox-auth-routes.ts). A request the door forwarded is refused here rather than
-      // at the door's own path list, so the card can answer with its one line instead of a bare 403:
-      // the person signed in at the door is already inside, and closing it from in there locks the next
-      // person out.
+      // The sign-in card (inbox-auth-routes.ts). A request that came in through a door is refused here
+      // rather than at the door's own path list, so the card can answer with its one line instead of a
+      // bare 403: the person signed in at the door is already inside, and closing it from in there locks
+      // the next person out. Cloudflare Access is refused for a different reason — it admits a whole
+      // team, and a teammate is not the owner of this Inbox — and the Access card already answers its own
+      // door that way just above.
       if (path === AUTH_ROUTE || path.startsWith(`${AUTH_ROUTE}/`)) {
-        const refusal = refuseDoorOrigin(req, json);
+        const refusal = refuseDoorOrigin(req, json, fromCfDoor.has(req));
         if (refusal) return refusal;
         const answer = await authRoutes?.handle(req, path);
         if (answer) return answer;
