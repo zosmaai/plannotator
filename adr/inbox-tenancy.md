@@ -228,9 +228,10 @@ Recorded, not fixed.
 - `packages/server/inbox.ts:6093`, `:8837` — `note` reaches the door only when debug logging is on, so a
   normal install leaves no trace of any door request; and the note keeps only three path segments
   (`inbox-auth-door.ts:207`), so it could not name a thread even when written.
-- `packages/server/inbox.ts:7637`, `packages/core/inbox-types.ts:3101` — "Accounts" in the window means the
-  computer's Claude and Codex logins, not the door's accounts; nothing lists the door's accounts or shows
-  who you are, and the same word means two things in one product.
+- `packages/server/inbox.ts:7637`, `packages/core/inbox-types.ts:3100-3101` — the route `GET
+  /api/inbox/accounts` answers Settings → Accounts, which reads the computer's Claude and Codex logins, not
+  the door's accounts. Nothing lists the door's accounts or shows who you are, and the same word means two
+  things in one product.
 - `packages/server/inbox-auth-instance.ts:25-26` — the comment over the password floor reads "Shorter than
   better-auth's default of 8: this is one person's Inbox, not a public sign-up service", and the constant
   below it is `AUTH_MIN_PASSWORD_LENGTH = 12`, which is longer than 8. The reason given and the number
@@ -239,9 +240,9 @@ Recorded, not fixed.
   `adr/implementation/inbox-auth.md:29`) — the door's cookies and identity headers stop at the door, which
   is right for isolation and is also why the window cannot render "signed in as …": the fix must open a
   one-way seam (a single identity header the window may read) rather than reuse one that exists.
-- `packages/shared/inbox/devices.ts:5-7`, `packages/server/inbox-devices.ts:105` — devices, phones and
-  machine links belong to the computer; two people on one computer cannot be told apart, and a phone paired
-  by one sees the other's everything.
+- `packages/shared/inbox/devices.ts:2` ("the phones paired with this Inbox"), `:27-49` — a device record has
+  an id, a name, a platform and a token hash, and no account or email of the person who paired it. Two people
+  on one computer cannot be told apart, and a phone paired by one sees the other's everything.
 - `packages/server/inbox-devices.ts:1257` — the phone door's allowlist carries `GET /api/inbox/accounts`,
   another per-computer read presented through a per-device door.
 - `apps/hook/server/inbox-auth-command.ts:210` — `auth remove` ends sessions and deletes the account row
