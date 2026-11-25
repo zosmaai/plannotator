@@ -254,7 +254,8 @@ export function createInboxAuthDoor(context: InboxAuthDoorContext) {
     // someone who signed in at the door change that door.
     context.note?.("auth_door_request", { path: path.split("/").slice(0, 3).join("/") });
     const forward = rebuild(req, scrubAuthDoorHeaders(req.headers));
-    markFromAuthDoor(forward);
+    // The account is marked with the request, from the session this door verified and from nothing the request said.
+    markFromAuthDoor(forward, { email: signed.email, name: signed.name });
     return context.dispatch(forward);
   };
 

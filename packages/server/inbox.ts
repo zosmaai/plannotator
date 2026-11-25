@@ -169,6 +169,7 @@ import { combineSuggestions, type InboxAgentWork } from "./inbox-combine-suggest
 import { createInboxTidy } from "./inbox-tidy";
 import { createInboxListVersions } from "./inbox-list-delta";
 import { debugRoute, INBOX_DEBUG_PATH, pullCloseFields, pullKeyForLog, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
+import { authDoorAccount } from "@plannotator/shared/inbox/auth-door";
 import { perfPhase, retainPerfPhases, syncSection, watchLoopStalls, withServerTiming } from "./inbox-perf";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
@@ -5848,6 +5849,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       cloudflare: fromCfDoor.has(req),
       window: !door && body !== undefined && isWindowRequest(req, body, serverSession),
       door: door ? { platform: door.platform, machineName, deviceName: door.name, place: door.place ?? null } : null,
+      // The account whose session the sign-in door checked (inbox-auth-door.ts). Null for every other way in, so a
+      // phone, a linked computer's forwarded line, and this computer's own window are named as they always were.
+      account: authDoorAccount(req),
     });
   };
 

@@ -6717,15 +6717,17 @@ public struct InboxMessageWireReadByAgent: Codable, Hashable, Sendable {
 
 public struct InboxMessageWireSentFrom: Codable, Hashable, Sendable {
   public var kind: JSONValue
+  public var account: InboxSessionAccount?
   public var name: String?
   public var via: InboxMessageWireSentFromVia?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["kind", "name", "via"]
+  static let knownKeys: Set<String> = ["kind", "account", "name", "via"]
 
-  public init(kind: JSONValue, name: String? = nil, via: InboxMessageWireSentFromVia? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(kind: JSONValue, account: InboxSessionAccount? = nil, name: String? = nil, via: InboxMessageWireSentFromVia? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.kind = kind
+    self.account = account
     self.name = name
     self.via = via
     self.unknownFields = unknownFields
@@ -6734,6 +6736,7 @@ public struct InboxMessageWireSentFrom: Codable, Hashable, Sendable {
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.kind = try c.decode(JSONValue.self, forKey: WireKey("kind"))
+    self.account = try c.decodeIfPresent(InboxSessionAccount.self, forKey: WireKey("account"))
     self.name = try c.decodeIfPresent(String.self, forKey: WireKey("name"))
     self.via = try c.decodeIfPresent(InboxMessageWireSentFromVia.self, forKey: WireKey("via"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
@@ -6742,6 +6745,7 @@ public struct InboxMessageWireSentFrom: Codable, Hashable, Sendable {
   public func encode(to encoder: Encoder) throws {
     var c = encoder.container(keyedBy: WireKey.self)
     try c.encode(self.kind, forKey: WireKey("kind"))
+    try c.encodeIfPresent(self.account, forKey: WireKey("account"))
     try c.encodeIfPresent(self.name, forKey: WireKey("name"))
     try c.encodeIfPresent(self.via, forKey: WireKey("via"))
     try WireKey.write(unknownFields, to: &c)
@@ -9908,6 +9912,36 @@ public struct InboxSentRecipient: Codable, Hashable, Sendable {
     try c.encode(self.owner, forKey: WireKey("owner"))
     try c.encode(self.wakes, forKey: WireKey("wakes"))
     try c.encode(self.deliveredAt, forKey: WireKey("delivered_at"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+/// From `packages/core/inbox-sent-from.ts`.
+public struct InboxSessionAccount: Codable, Hashable, Sendable {
+  public var email: String
+  public var name: String?
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["email", "name"]
+
+  public init(email: String, name: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+    self.email = email
+    self.name = name
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.email = try c.decode(String.self, forKey: WireKey("email"))
+    self.name = try c.decodeIfPresent(String.self, forKey: WireKey("name"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.email, forKey: WireKey("email"))
+    try c.encode(self.name, forKey: WireKey("name"))
     try WireKey.write(unknownFields, to: &c)
   }
 }

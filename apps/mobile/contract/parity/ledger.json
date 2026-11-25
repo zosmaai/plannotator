@@ -23167,6 +23167,34 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-field-inboxsessionaccount-email",
+      "title": "field:InboxSessionAccount.email",
+      "surface": [
+        "field:InboxSessionAccount.email"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxsessionaccount-name",
+      "title": "field:InboxSessionAccount.name",
+      "surface": [
+        "field:InboxSessionAccount.name"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-25",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }

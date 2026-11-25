@@ -182,17 +182,29 @@ export function authCookieName(secure: boolean): string {
   return `${secure ? "__Secure-" : ""}${AUTH_COOKIE_PREFIX}.session_token`;
 }
 
-/**
- * Requests the sign-in door handed on, remembered by the request object itself. Nothing about the
- * request says it: by the time the Inbox answers, the door's headers are scrubbed and the address it
- * came from is the machine's own loopback, so the only honest mark is one the door leaves on the
- * object it forwards.
- */
-const fromAuthDoor = new WeakSet<Request>();
+/** The account whose session the sign-in door checked before it handed a request on. */
+export interface InboxAuthDoorAccount {
+  email: string;
+  name: string | null;
+}
 
-/** Say that this request arrived through the sign-in door. The door calls this on everything it hands on. */
-export function markFromAuthDoor(req: Request): void {
-  fromAuthDoor.add(req);
+/**
+ * Requests the sign-in door handed on, remembered by the request object itself, with the account the
+ * door checked for them. Nothing about the request says either: by the time the Inbox answers, the
+ * door's headers are scrubbed and the address it came from is the machine's own loopback, so the only
+ * honest mark is one the door leaves on the object it forwards. The account is marked the same way for
+ * the same reason: it is what the door read out of the session it verified, not something the request
+ * was allowed to say about itself.
+ */
+const fromAuthDoor = new WeakMap<Request, InboxAuthDoorAccount | null>();
+
+/**
+ * Say that this request arrived through the sign-in door, and as which account when the door read a
+ * session. The door calls this on everything it hands on; the account is left out only where the door
+ * answered without one, which today it never does.
+ */
+export function markFromAuthDoor(req: Request, account?: InboxAuthDoorAccount | null): void {
+  fromAuthDoor.set(req, account ?? null);
 }
 
 /**
@@ -203,4 +215,13 @@ export function markFromAuthDoor(req: Request): void {
  */
 export function cameFromAuthDoor(req: Request): boolean {
   return fromAuthDoor.has(req);
+}
+
+/**
+ * The account the sign-in door checked for this request, or null when it came in any other way: a
+ * paired phone, a linked computer, this computer's own window. Only this door's accounts are told, so
+ * a line that reached the Inbox elsewhere is never named by an account this Inbox cannot vouch for.
+ */
+export function authDoorAccount(req: Request): InboxAuthDoorAccount | null {
+  return fromAuthDoor.get(req) ?? null;
 }
