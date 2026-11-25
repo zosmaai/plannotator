@@ -231,6 +231,7 @@
     "./inbox/claims": "./inbox/claims.ts",
     "./inbox/tailnet": "./inbox/tailnet.ts",
     "./inbox/cf-access": "./inbox/cf-access.ts",
+    "./inbox/auth-door": "./inbox/auth-door.ts",
     "./inbox/cf-access-verify": "./inbox/cf-access-verify.ts",
     "./inbox/cf-access-door": "./inbox/cf-access-door.ts",
     "./inbox/cf-access-api": "./inbox/cf-access-api.ts",

@@ -829,6 +829,21 @@ export interface PlannotatorConfig {
     dnsRecord?: string;
   };
   /**
+   * Sign in with an account: the Inbox's own passwords, for a public address
+   * without Cloudflare Access or Tailscale (`plannotator inbox auth`,
+   * packages/server/inbox-auth-door.ts). `on` opens the sign-in door,
+   * `host` is the public name it answers on, `allow` the addresses that may
+   * enter (nobody else gets past the sign-in page), `port` its loopback
+   * listener. Off and invisible when absent: on this computer nothing asks
+   * for a password. PLANNOTATOR_INBOX_AUTH=0 turns it off for one run.
+   */
+  inboxAuth?: {
+    on?: boolean;
+    host?: string;
+    allow?: string[];
+    port?: number;
+  };
+  /**
    * Exact origins of an app on this computer that may show the Plannotator
    * Inbox window in a frame (#3299), e.g. "app://myapp" or
    * "http://localhost:5173": loopback http(s) (no port means the default port only), or an app scheme.
