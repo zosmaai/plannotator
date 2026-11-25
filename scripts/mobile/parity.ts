@@ -102,7 +102,11 @@ export function parityProblems(ledger: Ledger, entries: readonly string[], check
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
-const slug = (entry: string) => entry.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+/**
+ * `*` is part of the name, not punctuation: `/api/inbox/sign-in` (read it) and `/api/inbox/sign-in/*`
+ * (write it) are two endpoints, and dropping the `*` gives them the same row id.
+ */
+const slug = (entry: string) => entry.toLowerCase().replace(/\*/g, 'all').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
 /** Every entry no row names gets an undecided row of its own, dated today. */
 export function deferNew(ledger: Ledger, entries: readonly string[], day = today()): Ledger {

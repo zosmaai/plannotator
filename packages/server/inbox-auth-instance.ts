@@ -27,6 +27,14 @@ export const AUTH_MIN_PASSWORD_LENGTH = 12;
 const SECRET_FILE = "auth-secret";
 const DATABASE_FILE = "auth.sqlite";
 
+/**
+ * Where the accounts live. Asked for before opening them, so that reading the list on an Inbox that
+ * has none does not create the file and the secret with it.
+ */
+export function inboxAuthDatabaseFile(dataDir: string): string {
+  return join(dataDir, DATABASE_FILE);
+}
+
 export interface InboxAuthInstanceOptions {
   dataDir: string;
   /** The public address people sign in at (`https://inbox.example.com`). */

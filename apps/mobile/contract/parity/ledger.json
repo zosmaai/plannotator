@@ -17775,6 +17775,7 @@
       "id": "window-only-control",
       "title": "Window endpoints under control with no door route",
       "surface": [
+        "window:/api/inbox/control/auth",
         "window:/api/inbox/control/cloudflare-access",
         "window:/api/inbox/control/connect",
         "window:/api/inbox/control/machines",
@@ -23148,6 +23149,21 @@
       "mobile": "undecided",
       "why": "",
       "since": "2026-11-24",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "window-only-sign-in",
+      "title": "Window endpoints under sign-in with no door route",
+      "surface": [
+        "window:/api/inbox/sign-in",
+        "window:/api/inbox/sign-in/*"
+      ],
+      "flows": [],
+      "mobile": "later",
+      "why": "L-nodoor: the phone reaches these only once a door route is added for them (sign-in).",
+      "reason": "L-nodoor",
       "ios": {
         "state": "not-started"
       }
