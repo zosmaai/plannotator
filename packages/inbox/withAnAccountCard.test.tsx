@@ -21,7 +21,7 @@ const { WithAnAccount } = (hasDom ? await import('./components/WithAnAccount') :
 
 const HOST = 'arjun.tail3ff43a.ts.net';
 const ME = 'arjun@zosma.ai';
-const MIN_PASSWORD = 10;
+const MIN_PASSWORD = 12; // the server's own `AUTH_MIN_PASSWORD_LENGTH`, so the card is judged against the rule it enforces
 
 /** What the routes would answer. The stub below applies each action the way the route does. */
 interface Door {
