@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { inboxApi, type LanState, type PairedDevice, type TailnetState, type TailscaleSettings } from '../api';
 import { shortTime } from '../format';
 import { Icon, TailscaleMark } from '../icons';
+import { AskTwiceButton } from './AskTwice';
 import { PairFlow } from './PairFlow';
 import { Tip } from './Tip';
 import { ThroughCloudflare } from './ThroughCloudflare';
+import { WithAnAccount } from './WithAnAccount';
 import { Switch } from './SettingSwitch';
 
 const PLATFORM: Record<string, string> = { ios: 'iPhone', android: 'Android' };
@@ -46,44 +48,6 @@ export function UnlinkLink({ name, onRemove, warning }: { name: string; onRemove
       confirmText={confirmText}
       confirmLabel={warning ? `Unlink ${name}: ${warning} Click again to unlink` : `Unlink ${name}: click again to unlink`}
     />
-  );
-}
-
-/** The button both ask with: the first click asks (for 4 s), the second acts. `label`/`confirmLabel`: what a screen reader says in each state. */
-function AskTwiceButton({
-  onRemove,
-  text,
-  label,
-  confirmText,
-  confirmLabel,
-}: {
-  onRemove: () => Promise<void>;
-  text: string;
-  label: string;
-  confirmText: string;
-  confirmLabel: string;
-}) {
-  const [state, setState] = useState<'idle' | 'confirm' | 'busy'>('idle');
-  useEffect(() => {
-    if (state !== 'confirm') return;
-    const timer = setTimeout(() => setState('idle'), 4000);
-    return () => clearTimeout(timer);
-  }, [state]);
-  return (
-    <button
-      type="button"
-      className={`ib-del-l${state === 'confirm' ? ' ib-confirm' : ''}`}
-      disabled={state === 'busy'}
-      aria-label={state === 'confirm' ? confirmLabel : label}
-      onClick={() => {
-        if (state === 'idle') return setState('confirm');
-        if (state !== 'confirm') return;
-        setState('busy');
-        onRemove().finally(() => setState('idle'));
-      }}
-    >
-      {state === 'confirm' ? confirmText : text}
-    </button>
   );
 }
 
@@ -480,6 +444,7 @@ export function DevicesSection({ phones, tailscale, via, tailscaleBusy, onToggle
       )}
       {tailscale && <OverYourTailnet state={tailscale} via={via} busy={tailscaleBusy} onToggle={onToggleTailscale} />}
       <ThroughCloudflare />
+      <WithAnAccount />
     </>
   );
 }
