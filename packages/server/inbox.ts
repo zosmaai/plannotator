@@ -8850,7 +8850,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     note: debugLog ? (event, data) => debugLog.note(event, data) : undefined,
   });
   authDoor.start();
-  authRoutes = createAuthRoutes({ dataDir, door: authDoor, json, readBody });
+  authRoutes = createAuthRoutes({
+    dataDir,
+    door: authDoor,
+    json,
+    readBody,
+    sessionMismatch: (body) => (checkServerSession(body, serverSession) === "mismatch" ? json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409) : null),
+  });
   cfRoutes = createCfAccessRoutes({
     dataDir,
     door: cfAccess,

@@ -45,7 +45,11 @@ export interface AuthRouteContext {
   door: Pick<InboxAuthDoor, "restart" | "state">;
   json: (data: unknown, status?: number) => Response;
   readBody: (req: Request) => Promise<Record<string, unknown> | null>;
-  onAfterChange?: () => void;
+  /**
+   * The window's `serverSession` nonce, checked the way every other card checks it (`inbox.ts`):
+   * a card left open across an Inbox restart must not write to the server that replaced it.
+   */
+  sessionMismatch?: (body: Record<string, unknown> | null) => Response | null;
 }
 
 /** What an account looks like to the card. */
@@ -108,37 +112,50 @@ export function createAuthRoutes(context: AuthRouteContext) {
     const host = settings?.host ?? stored?.host ?? "";
     const allow = settings?.allow ?? stored?.allow ?? [];
     const port = settings?.port ?? stored?.port ?? state.port ?? 0;
-    let accounts: AuthAccountView[] = [];
-    // Asked for even when the door is closed: the card says the accounts stay, and it can only say
-    // that while it can show them. An Inbox that has never had one is left without a file — opening
-    // the folder would make the database and its secret just to answer that there is nothing in them.
-    if (existsSync(inboxAuthDatabaseFile(context.dataDir))) {
-      const where = settings ?? openWithoutHost(config);
-      const auth = await openInboxAuth({ dataDir: context.dataDir, baseUrl: where.baseUrl, allow: where.allow });
-      try {
-        accounts = (await auth.list()).map((account) => ({
-          email: account.email,
-          name: account.name,
-          createdAt: account.createdAt,
-          lastSeenAt: account.lastSeenAt,
-          allowed: isAllowedAuthEmail(allow, account.email),
-        }));
-      } finally {
-        auth.close();
-      }
-    }
     return {
       configured: resolved.configured,
-      on: resolved.on,
+      // What is listening, not what the settings ask for: a door that could not take its port reads
+      // `on` here, so the card cannot show a switch on with nothing behind it.
+      on: state.on,
       host,
       port,
       url: host ? `https://${host}${AUTH_LOGIN_PATH}` : "",
       allow,
       error: resolved.error ?? state.error ?? "",
       minPasswordLength: AUTH_MIN_PASSWORD_LENGTH,
-      accounts,
+      accounts: await accountsOf(config, allow),
       pinnedByEnvironment: process.env["PLANNOTATOR_INBOX_AUTH_HOST"] !== undefined || process.env["PLANNOTATOR_INBOX_AUTH_ALLOW"] !== undefined,
     };
+  }
+
+  /**
+   * The accounts, read from the door's database. Asked for even when the door is closed: the card says
+   * the accounts stay, and it can only say that while it can show them. An Inbox that has never had one
+   * is left without a file — opening the folder would make the database and its secret just to answer
+   * that there is nothing in them.
+   */
+  async function accountsOf(config: ReturnType<typeof loadConfig>, allow: string[]): Promise<AuthAccountView[]> {
+    if (!existsSync(inboxAuthDatabaseFile(context.dataDir))) return [];
+    const where = resolveInboxAuth(config, process.env, () => false).settings ?? openWithoutHost(config);
+    const auth = await openInboxAuth({ dataDir: context.dataDir, baseUrl: where.baseUrl, allow: where.allow });
+    try {
+      return (await auth.list()).map((account) => ({
+        email: account.email,
+        name: account.name,
+        createdAt: account.createdAt,
+        lastSeenAt: account.lastSeenAt,
+        allowed: isAllowedAuthEmail(allow, account.email),
+      }));
+    } finally {
+      auth.close();
+    }
+  }
+
+  /** A write's answer: the card's view, or the refusal with the status it deserves. */
+  function answerWrite(result: AuthView | Refusal): Response {
+    if (!("code" in result)) return context.json(result);
+    // A config.json that could not be written (locked, or left unreadable) is not the request's fault.
+    return context.json(result, result.code === "not_saved" ? 500 : 400);
   }
 
   /** Which part of the form was wrong. The parser answers with one message; the code names the field, the way `on` names the button. */
@@ -167,10 +184,16 @@ export function createAuthRoutes(context: AuthRouteContext) {
    * four settings are written — the resolver derives the sign-in address from the host, so a `baseUrl`
    * left in the file would be a second answer to the same question.
    */
-  async function apply(settings: InboxAuthStored): Promise<AuthView> {
-    saveConfig({ inboxAuth: { on: settings.on, host: settings.host, allow: settings.allow, port: settings.port } });
+  async function apply(settings: InboxAuthStored): Promise<AuthView | Refusal> {
+    const landed = saveConfig({ inboxAuth: { on: settings.on, host: settings.host, allow: settings.allow, port: settings.port } });
+    if (!landed) {
+      return {
+        error: "The settings could not be saved to config.json. Fix or remove it on this computer, then try again.",
+        code: "not_saved",
+      };
+    }
+    // The door re-reads config.json, so it is told to restart rather than handed the settings.
     await context.door.restart();
-    context.onAfterChange?.();
     return view();
   }
 
@@ -194,13 +217,31 @@ export function createAuthRoutes(context: AuthRouteContext) {
       }
       const name = typeof body?.["name"] === "string" ? body["name"].trim() : "";
       const { created } = await auth.set({ email, password, name: name === "" ? undefined : name });
-      // A password replaced for an account that was already signed in: those sessions are ended, the
-      // same as when the account leaves.
-      if (!created) await auth.revokeSessions(email);
-      return view();
+      if (!created) {
+        // A password replaced for an account that was already signed in: those sessions are ended, the
+        // same as when the account leaves.
+        await auth.revokeSessions(email);
+        return view();
+      }
+      return allowedAccount(config, settings.allow, email);
     } finally {
       auth.close();
     }
+  }
+
+  /**
+   * A new account's address goes on the list of addresses that may enter, as the card promises. An
+   * account off that list could never sign in, so adding one would be a trap: the door restarts so the
+   * new address is one it checks.
+   */
+  async function allowedAccount(config: ReturnType<typeof loadConfig>, allow: string[], email: string): Promise<AuthView | Refusal> {
+    if (isAllowedAuthEmail(allow, email)) return view();
+    const stored = storedInboxAuth(config) ?? {};
+    const parsed = parseInboxAuthSettings({ ...stored, allow: [...allow, email] }, process.env, () => false);
+    // The door's own settings did not parse, so there is no list to write to: the account exists and
+    // the card shows the door's own complaint.
+    if ("error" in parsed) return view();
+    return apply({ ...parsed, on: stored.on === true });
   }
 
   /**
@@ -215,40 +256,47 @@ export function createAuthRoutes(context: AuthRouteContext) {
 
   async function handle(req: Request, path: string): Promise<Response | null> {
     if (path === AUTH_ROUTE && req.method === "GET") return context.json(await view());
+    if (!path.startsWith(`${AUTH_ROUTE}/`)) return null;
+    if (req.method !== "POST") {
+      return context.json({ error: `No sign-in action ${req.method} ${path}.`, code: "unknown_action" } satisfies Refusal, 404);
+    }
 
-    if (path === `${AUTH_ROUTE}/on` && req.method === "POST") {
-      const body = await context.readBody(req);
+    const body = await context.readBody(req);
+    // A card left open across an Inbox restart sends the old server's session: it is not the request's
+    // body that is wrong, so nothing is written and the card is told to reload.
+    const mismatch = context.sessionMismatch?.(body);
+    if (mismatch) return mismatch;
+
+    if (path === `${AUTH_ROUTE}/on`) {
       const settings = nextSettings(body);
       if ("error" in settings) return context.json({ error: settings.error, code: settingsCode(body) } satisfies Refusal, 400);
-      return context.json(await apply({ ...settings, on: true }));
+      // A door with no account on it lets nobody in, so it is not a door: ask for the account first.
+      if ((await accountsOf(loadConfig(), settings.allow ?? [])).length === 0) {
+        return context.json({ error: "Add an account before turning the door on.", code: "no_account" } satisfies Refusal, 400);
+      }
+      return answerWrite(await apply({ ...settings, on: true }));
     }
 
-    if (path === `${AUTH_ROUTE}/off` && req.method === "POST") {
+    if (path === `${AUTH_ROUTE}/off`) {
       const stored = storedInboxAuth(loadConfig()) ?? {};
-      return context.json(await apply({ ...stored, on: false }));
+      return answerWrite(await apply({ ...stored, on: false }));
     }
 
-    if (path === `${AUTH_ROUTE}/allow` && req.method === "POST") {
-      const body = await context.readBody(req);
+    if (path === `${AUTH_ROUTE}/allow`) {
       const stored = storedInboxAuth(loadConfig()) ?? {};
       const parsed = parseInboxAuthSettings({ host: stored.host ?? "", allow: parseAuthAllowList(body?.["allow"]), port: stored.port }, process.env, () => false);
       if ("error" in parsed) {
         const allow = parseAuthAllowList(body?.["allow"]);
         return context.json({ error: parsed.error, code: allow.length === 0 ? "empty_allow" : "bad_allow" } satisfies Refusal, 400);
       }
-      return context.json(await apply({ ...stored, allow: parsed.allow }));
+      return answerWrite(await apply({ ...stored, allow: parsed.allow }));
     }
 
-    if ((path === `${AUTH_ROUTE}/account` || path === `${AUTH_ROUTE}/account/remove`) && req.method === "POST") {
-      const result = await manageAccount(await context.readBody(req), path.endsWith("/remove"));
-      return "code" in result ? context.json(result, 400) : context.json(result);
+    if (path === `${AUTH_ROUTE}/account` || path === `${AUTH_ROUTE}/account/remove`) {
+      return answerWrite(await manageAccount(body, path.endsWith("/remove")));
     }
 
-    if (path.startsWith(`${AUTH_ROUTE}/`)) {
-      return context.json({ error: `No sign-in action ${req.method} ${path}.`, code: "unknown_action" } satisfies Refusal, 404);
-    }
-
-    return null;
+    return context.json({ error: `No sign-in action ${req.method} ${path}.`, code: "unknown_action" } satisfies Refusal, 404);
   }
 
   return { handle, view };

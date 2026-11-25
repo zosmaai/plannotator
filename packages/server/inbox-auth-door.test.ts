@@ -178,6 +178,26 @@ describe("the sign-in door", () => {
     expect(((await wrong.json()) as { code: string }).code).toBe("forbidden_host");
   }, 30_000);
 
+  test("a request that came through the door cannot change the door", async () => {
+    const { base } = await startWithAccounts();
+    await seed(ME);
+    const signed = await signIn(base, ME);
+    expect(signed.answer.status).toBe(200);
+
+    // The door marks what it hands the window (`markFromAuthDoor`), and the card's routes read that
+    // mark: someone signed in at the door must not be able to close it behind the next person.
+    const answer = await request(`${base}/api/inbox/sign-in/off`, {
+      method: "POST",
+      headers: { cookie: signed.cookie!, "content-type": "application/json", origin: `https://${HOST}` },
+      body: JSON.stringify({}),
+    });
+    expect(answer.status).toBe(403);
+    expect(await answer.json()).toEqual({
+      error: "The sign-in door cannot change itself. Change it on the computer itself or over your tailnet.",
+      code: "local_only",
+    });
+  }, 30_000);
+
   test("the sign-in page carries the form, the host, and a next that stays on this site", async () => {
     const { base } = await startWithAccounts();
     const page = await request(`${base}/login?next=${encodeURIComponent("//evil.example.net/x")}`);
