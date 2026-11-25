@@ -26,11 +26,17 @@ It stays narrow:
 
 **The allowlist gates entry, the account is the key.** Keeping both means an address can be taken out (it cannot get in, its account is not deleted) without deciding whether the account itself is gone. `auth list` marks an address that is not on the allowlist rather than hiding it, so the two lists cannot silently disagree.
 
+**The window's card writes through the window, and the door is told not to answer itself.** The card could have fetched the door's own port, but then the browser needs a second origin, its CORS and its own guards — and a page served by the door carries the door's session cookie, so someone signed in at the door could change the door from it. Instead the card posts to `/api/inbox/sign-in*` on the window's port, guarded the way every other window route is (same Origin, this computer or the tailnet owner, never the device door or the relay), and the door marks anything that came in through it (`Plannotator-Door: auth`, `markFromAuthDoor`) so the window answers `403 { code: "local_only" }` (`refuseDoorOrigin`) before those routes run. A door that answers that way is shown, not guessed: the card says where to change it and offers nothing to click.
+
+**Read and write are separate, so a read cannot open a listener.** `configured` means config.json names `inboxAuth` at all — which is why the card offers **Set up** until it does — and `on` means the listener is open. The card makes the first account *before* it posts `on`: an open door nobody can enter locks the owner out of their own Inbox. A turn off keeps the accounts and the list, so opening it again is one click.
+
+**One password floor, one place.** `AUTH_MIN_PASSWORD_LENGTH` lives in `packages/server/inbox-auth-instance.ts`, and the card, the CLI and the refusal all read it from there rather than each keeping a number. The card never changes a password — passwords are typed where they are used — so a forgotten one means remove the account and make it again, the same line the CLI teaches.
+
 **The door's cookies stop at the door.** `scrubAuthDoorHeaders` drops `Cf-*`, `Tailscale-*`, `X-Forwarded-*` and `Plannotator-Door*`, and `withoutAuthCookies` drops `plannotator.session_token` / `__Secure-plannotator.session_token` before anything is handed to the window. The window never learns the door has sessions.
 
 ## Not built
 
-Passkeys, TOTP two-factor, password reset by email, invites with a link, and more than one door at a time. Each is a Better Auth plugin away, and none is needed to let one person in at a public name.
+Who else may change these settings from the window (the card is open to anyone the window already lets in — the tailnet owner and this computer — and gating it further needs the session roles the window does not keep yet), a way to change a password from the card, updating one address on the allowlist instead of the whole list, and rate limits on the settings routes. Passkeys, TOTP two-factor, password reset by email, invites with a link, and more than one door at a time. Each is a Better Auth plugin away, and none is needed to let one person in at a public name.
 
 ## Files
 
@@ -39,9 +45,13 @@ Passkeys, TOTP two-factor, password reset by email, invites with a link, and mor
 - `packages/server/inbox-auth-door.ts`: the listener and its checks; the registry record (`inbox_auth`).
 - `packages/server/inbox-auth-login.ts`: the sign-in page, `/auth.css`, `/auth.js`.
 - `apps/hook/server/inbox-auth-command.ts`: `plannotator inbox auth add | list | remove | on | off | status`.
+- `packages/server/inbox-auth-routes.ts`: `/api/inbox/sign-in*` for the settings card, and the refusal that runs ahead of them.
+- `packages/inbox/components/WithAnAccount.tsx`, `packages/inbox/data/inboxAuth.ts`, `packages/inbox/components/AskTwice.tsx`: the card in Settings → Remote devices, its read and writes, and remove-asked-twice.
 - `docs/agent-guides/inbox-sign-in.md`: the guide.
 
 ## Tests
 
 - `packages/server/inbox-auth-door.test.ts`: the door end to end on a real listener.
 - `apps/hook/server/inbox-auth-command.test.ts`: the command, with the password asked for, config.json, the allowlist note, remove, off, `--json`.
+- `packages/server/inbox-auth-routes.test.ts`: the routes against a real door in a temp data dir — never set up, account then open, on and off without losing accounts, the list growing by one, the minimum length, an address off the list, the door's own requests refused, config.json read back after each write.
+- `packages/inbox/withAnAccountCard.test.tsx`: the card in the DOM test runner — waits for the read, the set-up form's order and one post at a time, the refused card, remove asked twice, the switch keeping accounts, an added address joining the list.
