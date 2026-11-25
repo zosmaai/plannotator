@@ -2,7 +2,8 @@
 
 Updated: 2026-11-25
 
-Status: implemented in `zosmaai/plannotator`, not yet upstreamed.
+Status: implemented in `zosmaai/plannotator`, not yet upstreamed. Passkeys added on top; TOTP
+designed but not built (see "TOTP, if it is wanted").
 
 ## Summary
 
@@ -34,16 +35,54 @@ It stays narrow:
 
 **The door's cookies stop at the door.** `scrubAuthDoorHeaders` drops `Cf-*`, `Tailscale-*`, `X-Forwarded-*` and `Plannotator-Door*`, and `withoutAuthCookies` drops `plannotator.session_token` / `__Secure-plannotator.session_token` before anything is handed to the window. The window never learns the door has sessions.
 
+**Passkeys are the door's, not the window's.** A passkey is another way through this door, so it is
+managed on the door's own page (`/passkeys`), reachable only with a session — the natural gate, and
+no new rule. Putting it in the window's Settings would have meant a signed-out person could not
+enrol one, and would have put door state behind the window's own routes. It uses
+`@better-auth/passkey` 1.7.25 (the release matched to `better-auth` 1.7.25); the door writes no
+ceremony code, and a passkey sign-in makes the same session cookie a password makes, so the
+allowlist, the `CLOSED` routes and the cookie stripping are untouched. The relying party is the
+door's public name (`rpID` = `inboxAuth.host`, origin = `settings.baseUrl`): a passkey belongs to the
+name the person is on, which is why the loopback address cannot use one and the page says so.
+
+**The door lists its own passkeys, and never hands a key back.** `GET /api/inbox/auth/passkeys`
+answers for the session's user, takes no address from the request, and returns a name, a date and
+the door's row id — not `publicKey`, `credentialID` or `counter`. Removing the last passkey of an
+account with no password is refused (`409 last_way_in`): a second way in must not become the only
+way out. The page's script lives in `inbox-auth-login.ts` beside the sign-in page's, because the CSP
+names `'self'` only — a CDN or a `@simplewebauthn/browser` bundle would have broken it.
+
+## TOTP, if it is wanted (designed, not built)
+
+Not built: it needs an enrolment page, recovery codes and a decision about a lost phone, and it
+changes the sign-in flow that both the password form and the passkey button sit on. The shape it
+should take, so the next person does not have to decide again:
+
+- `@better-auth/two-factor`, behind `inboxAuth.twoFactor: true` — parsed by the existing
+  `parseInboxAuthSettings`/`resolveInboxAuth` idiom, no second config mechanism, env override
+  `PLANNOTATOR_INBOX_AUTH_TWO_FACTOR` alongside the others.
+- Enrolment at `/two-factor` on the door, styled from `AUTH_CSS`, reachable only with a session: a
+  QR (drawn as an inline SVG, since the CSP allows no remote image), the secret in text, one code to
+  confirm.
+- The gate: a session made by password **or passkey** counts as `totpPending` until a code is given;
+  the door sends a navigation to `/two-factor?next=…` and answers `401 totp_required` to a call,
+  exactly where it answers `auth_required` today. A person who has not enrolled is not asked — the
+  password and the passkey stay enough — so enrolment can never lock anyone out.
+- `plannotator inbox auth add` prints the recovery codes it makes, and `auth remove` clears them.
+- Tests belong beside `inbox-auth-passkey.test.ts`: TOTP is testable with a real code from the
+  secret, no authenticator needed.
+
 ## Not built
 
-Who else may change these settings from the window (the card is open to anyone the window already lets in — the tailnet owner and this computer — and gating it further needs the session roles the window does not keep yet), a way to change a password from the card, updating one address on the allowlist instead of the whole list, and rate limits on the settings routes. Passkeys, TOTP two-factor, password reset by email, invites with a link, and more than one door at a time. Each is a Better Auth plugin away, and none is needed to let one person in at a public name.
+Who else may change these settings from the window (the card is open to anyone the window already lets in — the tailnet owner and this computer — and gating it further needs the session roles the window does not keep yet), a way to change a password from the card, updating one address on the allowlist instead of the whole list, and rate limits on the settings routes. TOTP two-factor (designed above), password reset by email, invites with a link, passkey renaming, recovery codes, and more than one door at a time. Each is a Better Auth plugin away, and none is needed to let one person in at a public name.
 
 ## Files
 
 - `packages/shared/inbox/auth-door.ts`: settings, allowlist, `safeNextPath`, `withoutAuthCookies`, `isAuthOwnedPath`, cookie name.
 - `packages/server/inbox-auth-instance.ts`: the Better Auth instance, `<dataDir>/auth.sqlite`, `<dataDir>/auth-secret`, `list`/`set`/`remove`, `sessionUser`.
 - `packages/server/inbox-auth-door.ts`: the listener and its checks; the registry record (`inbox_auth`).
-- `packages/server/inbox-auth-login.ts`: the sign-in page, `/auth.css`, `/auth.js`.
+- `packages/server/inbox-auth-login.ts`: the sign-in page, the passkeys page, `/auth.css`, `/auth.js`, `/passkeys.js`.
+- `packages/server/passkey-fixtures.ts`: a software WebAuthn authenticator for tests (no new dependency).
 - `apps/hook/server/inbox-auth-command.ts`: `plannotator inbox auth add | list | remove | on | off | status`.
 - `packages/server/inbox-auth-routes.ts`: `/api/inbox/sign-in*` for the settings card, and the refusal that runs ahead of them.
 - `packages/inbox/components/WithAnAccount.tsx`, `packages/inbox/data/inboxAuth.ts`, `packages/inbox/components/AskTwice.tsx`: the card in Settings → Remote devices, its read and writes, and remove-asked-twice.
@@ -52,6 +91,7 @@ Who else may change these settings from the window (the card is open to anyone t
 ## Tests
 
 - `packages/server/inbox-auth-door.test.ts`: the door end to end on a real listener.
+- `packages/server/inbox-auth-passkey.test.ts`: 13 tests, a real WebAuthn ceremony (register, sign in, replay, wrong key, wrong site, another account, the allowlist, removal, the last passkey, the page).
 - `apps/hook/server/inbox-auth-command.test.ts`: the command, with the password asked for, config.json, the allowlist note, remove, off, `--json`.
 - `packages/server/inbox-auth-routes.test.ts`: the routes against a real door in a temp data dir — never set up, account then open, on and off without losing accounts, the list growing by one, the minimum length, an address off the list, the door's own requests refused, config.json read back after each write.
 - `packages/inbox/withAnAccountCard.test.tsx`: the card in the DOM test runner — waits for the read, the set-up form's order and one post at a time, the refused card, remove asked twice, the switch keeping accounts, an added address joining the list.
