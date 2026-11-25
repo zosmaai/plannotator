@@ -7,7 +7,8 @@
  * that cannot be read rendering controls that would do nothing; the switch posting the wrong action or
  * taking the accounts with it; an account removed on one click; a second address added by replacing the
  * first; the set-up form opening the door before the first account exists; its button staying live and
- * posting twice while a write is in flight.
+ * posting twice while a write is in flight; a card that could not read the door leaving nothing to click;
+ * a door whose settings come from the environment offering an edit the route would ignore.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -20,7 +21,7 @@ const { WithAnAccount } = (hasDom ? await import('./components/WithAnAccount') :
 
 const HOST = 'arjun.tail3ff43a.ts.net';
 const ME = 'arjun@zosma.ai';
-const MIN_PASSWORD = 10;
+const MIN_PASSWORD = 12; // the server's own `AUTH_MIN_PASSWORD_LENGTH`, so the card is judged against the rule it enforces
 
 /** What the routes would answer. The stub below applies each action the way the route does. */
 interface Door {
@@ -31,6 +32,8 @@ interface Door {
   allow: string[];
   accounts: { email: string; name: string; createdAt: string; lastSeenAt: string | null; allowed: boolean }[];
   error: string;
+  /** The Inbox's environment sets the address or the list, as `PLANNOTATOR_INBOX_AUTH_HOST` / `_ALLOW` do. */
+  pinnedByEnvironment: boolean;
   /** Set to a route's refusal: every request comes back with it, the way a door's own page is told off. */
   refusal?: { code: string; message: string };
 }
@@ -51,6 +54,7 @@ const freshDoor = (over: Partial<Door> = {}): Door => ({
   allow: [],
   accounts: [],
   error: '',
+  pinnedByEnvironment: false,
   ...over,
 });
 
@@ -92,6 +96,7 @@ const view = () => ({
   error: door.error,
   minPasswordLength: MIN_PASSWORD,
   accounts: door.accounts,
+  pinnedByEnvironment: door.pinnedByEnvironment,
 });
 
 const jsonResponse = (data: unknown, status = 200) =>
@@ -265,6 +270,36 @@ if (hasDom) {
       expect(calls.map((call) => call.action)).toEqual(['allow']);
       expect(calls[0].body['allow']).toEqual([ME, other]);
       expect(all('[data-signin-allow]').map((node) => node.getAttribute('data-signin-allow'))).toEqual([ME, other]);
+    });
+
+    test('a door the environment pins says so, and offers no way to edit the list', async () => {
+      await render({ configured: true, on: true, host: HOST, allow: [ME], accounts: [account(ME)], pinnedByEnvironment: true });
+
+      expect(query('[data-signin-pinned]')?.textContent).toContain('environment sets the address and the list');
+      // The list is the environment's, so there is nothing here to add to it or to take off it.
+      expect(query('[data-signin-add-address]')).toBeNull();
+      expect(query('[data-signin-allow]')?.textContent).toContain('From the environment');
+      expect(button(`Remove ${ME}`)).toBeUndefined();
+      // Turning the door on and off is still the person's: only the address and the list are pinned.
+      expect(query('[role="switch"]')).not.toBeNull();
+    });
+
+    test('a door that could not be read says so, and can be read again', async () => {
+      let failing = true;
+      globalThis.fetch = (async () => {
+        if (!failing) return jsonResponse(view());
+        return jsonResponse({ error: 'Could not read the door.', code: 'failed' }, 500);
+      }) as unknown as typeof fetch;
+
+      await render();
+      expect(query('[data-settings-signin]')?.getAttribute('data-settings-signin')).toBe('unread');
+      expect(query('[data-signin-load-error]')?.textContent).toContain('Could not read the door.');
+      expect(query('[role="switch"]')).toBeNull();
+
+      failing = false;
+      await click(query('[data-signin-retry]'));
+      expect(query('[data-signin-load-error]')).toBeNull();
+      expect(query('[data-settings-signin]')?.getAttribute('data-settings-signin')).toBe('off');
     });
   });
 }

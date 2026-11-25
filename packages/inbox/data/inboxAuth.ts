@@ -22,6 +22,8 @@ export interface InboxAuthView {
   error: string | null;
   minPasswordLength: number;
   accounts: InboxAuthAccount[];
+  /** The Inbox's environment sets the address or the list, so this card shows them and cannot change them. */
+  pinnedByEnvironment: boolean;
 }
 
 export class InboxAuthRefusal extends Error {

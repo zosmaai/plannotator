@@ -26,6 +26,7 @@
  */
 
 import { loadConfig } from "@plannotator/shared/config";
+import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { updateOwnInboxRegistry, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import {
   AUTH_BASE_PATH,
@@ -231,6 +232,11 @@ export function createInboxAuthDoor(context: InboxAuthDoorContext) {
     }
     if (path === `${PASSKEY_API_PATH}/remove`) {
       if (req.method !== "POST") return jsonError(405, "method_not_allowed", "Remove a passkey with POST.");
+      // The first thing at this door that changes state, so the first that has to say where it came
+      // from: another page must not be able to take a passkey off an account it cannot reach itself.
+      if (!isSameOriginOrNoOrigin(req.headers.get("origin"), req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+        return jsonError(403, "forbidden_origin", "That request did not come from this page.");
+      }
       const asked = (await req.json().catch(() => null)) as { id?: unknown } | null;
       const id = typeof asked?.id === "string" ? asked.id : "";
       if (!id) return jsonError(400, "bad_request", "Say which passkey to remove.");

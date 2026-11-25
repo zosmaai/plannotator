@@ -118,6 +118,8 @@ describe("plannotator inbox auth", () => {
     expect(await run(["status"])).toBe(0);
     expect(out.join("\n")).toContain("Sign-in: off at https://inbox.example.com/");
     expect(out.join("\n")).toContain(`Accounts: ${ME}`);
+    // The passkeys page is only reachable by signing in at the door, and nothing else links to it.
+    expect(out.join("\n")).toContain("Passkeys: https://inbox.example.com/passkeys");
   }, 60_000);
 
   test("--json is for a program", async () => {
@@ -132,7 +134,7 @@ describe("plannotator inbox auth", () => {
 
     out = [];
     expect(await run(["status"], [], true)).toBe(0);
-    const status = JSON.parse(out.join("\n")) as { on: boolean; url: string; configured: boolean };
-    expect(status).toMatchObject({ configured: true, on: true, url: "https://inbox.example.com/" });
+    const status = JSON.parse(out.join("\n")) as { on: boolean; url: string; passkeys: string; configured: boolean };
+    expect(status).toMatchObject({ configured: true, on: true, url: "https://inbox.example.com/", passkeys: "https://inbox.example.com/passkeys" });
   }, 60_000);
 });

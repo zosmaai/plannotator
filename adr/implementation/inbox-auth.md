@@ -43,7 +43,7 @@ enrol one, and would have put door state behind the window's own routes. It uses
 ceremony code, and a passkey sign-in makes the same session cookie a password makes, so the
 allowlist, the `CLOSED` routes and the cookie stripping are untouched. The relying party is the
 door's public name (`rpID` = `inboxAuth.host`, origin = `settings.baseUrl`): a passkey belongs to the
-name the person is on, which is why the loopback address cannot use one and the page says so.
+name the person is on, which is why the loopback address cannot use one, and why the page says so under its button.
 
 **The door lists its own passkeys, and never hands a key back.** `GET /api/inbox/auth/passkeys`
 answers for the session's user, takes no address from the request, and returns a name, a date and
@@ -91,7 +91,7 @@ Who else may change these settings from the window (the card is open to anyone t
 ## Tests
 
 - `packages/server/inbox-auth-door.test.ts`: the door end to end on a real listener.
-- `packages/server/inbox-auth-passkey.test.ts`: 13 tests, a real WebAuthn ceremony (register, sign in, replay, wrong key, wrong site, another account, the allowlist, removal, the last passkey, the page).
+- `packages/server/inbox-auth-passkey.test.ts`: 14 tests, a real WebAuthn ceremony (register, sign in, replay, wrong key, wrong site, another account, the allowlist, removal, the last passkey, the page).
 - `apps/hook/server/inbox-auth-command.test.ts`: the command, with the password asked for, config.json, the allowlist note, remove, off, `--json`.
 - `packages/server/inbox-auth-routes.test.ts`: the routes against a real door in a temp data dir — never set up, account then open, on and off without losing accounts, the list growing by one, the minimum length, an address off the list, the door's own requests refused, config.json read back after each write.
 - `packages/inbox/withAnAccountCard.test.tsx`: the card in the DOM test runner — waits for the read, the set-up form's order and one post at a time, the refused card, remove asked twice, the switch keeping accounts, an added address joining the list.

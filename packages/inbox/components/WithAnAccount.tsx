@@ -31,6 +31,14 @@ function seen(account: InboxAuthAccount): string {
   return Number.isNaN(when.getTime()) ? 'has not signed in yet' : `last seen ${when.toLocaleDateString()}`;
 }
 
+/**
+ * What to show for a write that did not land: the server's own words when it refused, and one line for
+ * a network that never answered.
+ */
+function messageOf(failure: unknown): string {
+  return failure instanceof InboxAuthRefusal ? failure.message : 'Could not reach this Inbox.';
+}
+
 /** A copy of the address, so it can be typed on a phone once. Same button `ThroughCloudflare` uses. */
 function CopyAddress({ url }: { url: string }) {
   const [copied, setCopied] = useState(false);
@@ -65,7 +73,7 @@ function CopyAddress({ url }: { url: string }) {
  * one is refused by the route rather than asked for here: a door with no address on it shuts everyone
  * out, the person signing in included.
  */
-function AllowRow({ address, last, onRemove }: { address: string; last: boolean; onRemove: () => Promise<void> }) {
+function AllowRow({ address, last, pinned, onRemove }: { address: string; last: boolean; pinned: boolean; onRemove: () => Promise<void> }) {
   return (
     <div className="ib-prow" data-signin-allow={address}>
       <span className="ib-txt">
@@ -73,7 +81,9 @@ function AllowRow({ address, last, onRemove }: { address: string; last: boolean;
         <span className="ib-desc">May sign in here. Anyone else who reaches the address is refused.</span>
       </span>
       <span className="ib-ctl">
-        {last ? (
+        {pinned ? (
+          <span className="ib-desc">From the environment</span>
+        ) : last ? (
           <span className="ib-desc">The only address left</span>
         ) : (
           <AskTwiceButton
@@ -101,7 +111,7 @@ function AddAddressRow({ current, busy, onAdd, onRefusal }: { current: string[];
       // The route replaces the whole list, so the new address goes onto the ones already there.
       onAdd(await postInboxAuth('allow', { allow: [...current, trimmed] }));
     } catch (failure) {
-      onRefusal(failure instanceof InboxAuthRefusal ? failure.message : 'Could not reach this Inbox.');
+      onRefusal(messageOf(failure));
     }
   };
   return (
@@ -125,7 +135,7 @@ function AddAddressRow({ current, busy, onAdd, onRefusal }: { current: string[];
  * account first, so a password too short refuses before the door has a host name and nobody is left
  * outside a half-built door.
  */
-function SetUpForm({ minPasswordLength, onDone, onCancel }: { minPasswordLength: number; onDone: (view: InboxAuthView) => void; onCancel: () => void }) {
+function SetUpForm({ minPasswordLength, pinned, onDone, onCancel }: { minPasswordLength: number; pinned: boolean; onDone: (view: InboxAuthView) => void; onCancel: () => void }) {
   const [host, setHost] = useState('');
   const [allow, setAllow] = useState('');
   const [email, setEmail] = useState('');
@@ -146,7 +156,7 @@ function SetUpForm({ minPasswordLength, onDone, onCancel }: { minPasswordLength:
         .filter((entry) => entry !== '');
       onDone(await postInboxAuth('on', { host: host.trim(), allow: list.length > 0 ? list : [address] }));
     } catch (failure) {
-      setError(failure instanceof InboxAuthRefusal ? failure.message : 'Could not reach this Inbox.');
+      setError(messageOf(failure));
       setBusy(false);
     }
   };
@@ -158,6 +168,11 @@ function SetUpForm({ minPasswordLength, onDone, onCancel }: { minPasswordLength:
       </div>
       <div className="ib-flow-body">
         <p className="ib-lead">The address is where your phone types this Inbox: a tailnet box already has one, <span className="ib-mono">&lt;name&gt;.&lt;tailnet&gt;.ts.net</span>.</p>
+        {pinned && (
+          <p className="ib-desc" data-signin-pinned="setup">
+            This Inbox's environment sets the address and the list, so both are fixed here.
+          </p>
+        )}
         <div className="ib-card">
           <div className="ib-prow">
             <span className="ib-txt">
@@ -167,7 +182,7 @@ function SetUpForm({ minPasswordLength, onDone, onCancel }: { minPasswordLength:
               <span className="ib-desc">Without it the door has nothing to open on, so turning it on refuses.</span>
             </span>
             <span className="ib-ctl ib-vkeyctl">
-              <input id="ib-signin-host" className="ib-vkey" type="text" autoComplete="off" spellCheck={false} placeholder="boson.tail9.ts.net" value={host} onChange={(event) => setHost(event.target.value)} />
+              <input id="ib-signin-host" className="ib-vkey" type="text" autoComplete="off" spellCheck={false} disabled={pinned} placeholder="boson.tail9.ts.net" value={host} onChange={(event) => setHost(event.target.value)} />
             </span>
           </div>
           <div className="ib-prow">
@@ -175,10 +190,10 @@ function SetUpForm({ minPasswordLength, onDone, onCancel }: { minPasswordLength:
               <label className="ib-l" htmlFor="ib-signin-allow">
                 Addresses that may enter
               </label>
-              <span className="ib-desc">One per line. Left empty, the account below is the only one.</span>
+              <span className="ib-desc">Commas separate them. Left empty, the account below is the only one.</span>
             </span>
             <span className="ib-ctl ib-vkeyctl">
-              <input id="ib-signin-allow" className="ib-vkey" type="text" autoComplete="off" spellCheck={false} placeholder="arjun@zosma.ai" value={allow} onChange={(event) => setAllow(event.target.value)} />
+              <input id="ib-signin-allow" className="ib-vkey" type="text" autoComplete="off" spellCheck={false} disabled={pinned} placeholder="arjun@zosma.ai" value={allow} onChange={(event) => setAllow(event.target.value)} />
             </span>
           </div>
           <div className="ib-prow">
@@ -187,6 +202,9 @@ function SetUpForm({ minPasswordLength, onDone, onCancel }: { minPasswordLength:
                 First account
               </label>
               <span className="ib-desc">It signs in with the password typed below, and only if its address is on the list above. The password is hashed, never mailed.</span>
+              <label className="ib-desc" htmlFor="ib-signin-password">
+                Password
+              </label>
             </span>
             <span className="ib-ctl ib-vkeyctl">
               <input id="ib-signin-email" className="ib-vkey" type="email" autoComplete="off" spellCheck={false} placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} />
@@ -236,7 +254,7 @@ function AddAccountRow({ minPasswordLength, onAdded, onRefusal, onCancel }: { mi
       setEmail('');
       setPassword('');
     } catch (failure) {
-      onRefusal(failure instanceof InboxAuthRefusal ? failure.message : 'Could not reach this Inbox.');
+      onRefusal(messageOf(failure));
     } finally {
       setBusy(false);
     }
@@ -274,16 +292,21 @@ function AddAccountRow({ minPasswordLength, onAdded, onRefusal, onCancel }: { mi
 export function WithAnAccount() {
   const [view, setView] = useState<InboxAuthView | null>(null);
   const [refused, setRefused] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [settingUp, setSettingUp] = useState(false);
   const [addingAccount, setAddingAccount] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setLoadError(null);
     try {
       setView(await readInboxAuth());
     } catch (failure) {
       if (failure instanceof InboxAuthRefusal && failure.code === 'local_only') setRefused(true);
+      // Anything else is a card that could not read the door: it says so and offers the read again,
+      // rather than disappearing out of Settings with nothing to click.
+      else setLoadError(messageOf(failure));
     }
   }, []);
 
@@ -299,7 +322,21 @@ export function WithAnAccount() {
       </section>
     );
   }
-  if (!view) return null;
+  if (!view) {
+    if (loadError === null) return null;
+    return (
+      <section className="ib-sgroup" data-settings-signin="unread" aria-labelledby="ib-g-signin">
+        <h2 id="ib-g-signin">Sign in with an account</h2>
+        <div className="ib-callout ib-err" role="alert" data-signin-load-error="">
+          <Icon name="xCircle" />
+          <span>{loadError}</span>
+        </div>
+        <button type="button" className="ib-btn ib-ghost" onClick={() => void load()} data-signin-retry="">
+          Try again
+        </button>
+      </section>
+    );
+  }
 
   const send = async (action: 'on' | 'off' | 'allow' | 'account' | 'account/remove', body: Record<string, unknown>) => {
     setBusy(true);
@@ -307,13 +344,13 @@ export function WithAnAccount() {
     try {
       setView(await postInboxAuth(action, body));
     } catch (failure) {
-      setError(failure instanceof InboxAuthRefusal ? failure.message : 'Could not reach this Inbox.');
+      setError(messageOf(failure));
     } finally {
       setBusy(false);
     }
   };
 
-  const state = refused ? 'elsewhere' : settingUp ? 'setup' : !view.configured ? 'off' : view.on ? 'on' : 'paused';
+  const state = settingUp ? 'setup' : !view.configured ? 'off' : view.on ? 'on' : 'paused';
   return (
     <section className="ib-sgroup" data-settings-signin={state} aria-labelledby="ib-g-signin">
       <h2 id="ib-g-signin">Sign in with an account</h2>
@@ -321,9 +358,15 @@ export function WithAnAccount() {
         A sign-in page of this Inbox's own: an e-mail and a password, so a device that is not on your tailnet and has no Cloudflare can still open it. Anyone who can reach the address can try a
         password, so the list of addresses that may enter stays short.
       </p>
+      {!settingUp && view.pinnedByEnvironment && (
+        <p data-signin-pinned="">
+          This Inbox's environment sets the address and the list, so both are fixed here.
+        </p>
+      )}
       {settingUp ? (
         <SetUpForm
           minPasswordLength={view.minPasswordLength}
+          pinned={view.pinnedByEnvironment}
           onDone={(next) => {
             setView(next);
             setSettingUp(false);
@@ -367,10 +410,11 @@ export function WithAnAccount() {
               key={address}
               address={address}
               last={view.allow.length === 1}
+              pinned={view.pinnedByEnvironment}
               onRemove={() => send('allow', { allow: view.allow.filter((entry) => entry !== address) })}
             />
           ))}
-          {view.configured && <AddAddressRow current={view.allow} busy={busy} onAdd={(next) => setView(next)} onRefusal={setError} />}
+          {view.configured && !view.pinnedByEnvironment && <AddAddressRow current={view.allow} busy={busy} onAdd={(next) => setView(next)} onRefusal={setError} />}
           {view.accounts.map((account) => (
             <div className="ib-prow" key={account.email} data-signin-account={account.email}>
               <span className="ib-txt">

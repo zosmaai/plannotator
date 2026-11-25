@@ -5,6 +5,7 @@ import {
   normalizeAuthEmail,
   parseAuthAllowList,
   parseInboxAuthSettings,
+  PASSKEY_PAGE_PATH,
   resolveInboxAuth,
   storedInboxAuth,
 } from "@plannotator/shared/inbox/auth-door";
@@ -274,8 +275,10 @@ export async function runInboxAuthCommand(args: readonly string[], deps: InboxAu
   if (command === "status") {
     const record = readInboxRegistry(deps.dataDir)?.inbox_auth ?? null;
     const where = stored?.host ? `https://${stored.host}/` : null;
+    // Where the people who can sign in manage their passkeys: nothing else in the product links there.
+    const passkeys = where ? `${where.replace(/\/$/, "")}${PASSKEY_PAGE_PATH}` : null;
     if (deps.json) {
-      out(JSON.stringify({ configured: resolved.configured, on: resolved.on, url: where, allow, open: record }, null, 2));
+      out(JSON.stringify({ configured: resolved.configured, on: resolved.on, url: where, passkeys, allow, open: record }, null, 2));
       return 0;
     }
     if (!resolved.configured) {
@@ -288,6 +291,7 @@ export async function runInboxAuthCommand(args: readonly string[], deps: InboxAu
     out(`Allowlist: ${allow.length > 0 ? allow.join(", ") : "nobody"}`);
     const accounts = await withAccounts(deps.dataDir, resolved.settings?.baseUrl ?? configBaseUrl, allow, (instance) => instance.list());
     out(`Accounts: ${accounts.length === 0 ? "none" : accounts.map((account) => account.email).join(", ")}`);
+    if (passkeys) out(`Passkeys: ${passkeys} (sign in at the door to add one)`);
     return 0;
   }
 
