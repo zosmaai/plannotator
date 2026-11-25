@@ -258,3 +258,38 @@ Recorded, not fixed.
   routing tweak inside the door but a different shape of server.
 - `packages/server/inbox-auth-door.ts:61-66` — `CLOSED`, four patterns, is all that stands between an account
   and the agent-facing routes; every new agent route has to be added to it by hand.
+
+## Where this came from
+
+A decision made on 25 November 2026 about who may change how you get in. It is recorded here because it
+belongs to the ADR and not to one thread: a guide and an ADR that disagree is a guide that has rotted.
+
+The question put to the owner was whether the sign-in card's settings are for every allowed account or for
+the Inbox's owner only, with four options: owner only, every account, owner at the terminal and a tailnet
+admin, or leave it open until a tenant arrives. The answer was **the terminal root only**, and it was built
+that way: a request that arrived through Cloudflare Access is refused by the sign-in card with `local_only`,
+the same answer the Access card already gives. Two settings that decide who may enter, answered by whoever
+holds either address, is not a defensible state.
+
+The rule, in the guide, the card's comment and this ADR alike: **the Inbox's owner, and nobody who arrived
+through a door.** The terminal stays the root, because the terminal writes with no `sent_from` at all and no
+session behind it, so the only thing it can be told apart by is where it stands.
+
+## Decided, and what is still open
+
+Answered on 25 November 2026:
+
+- **How you get in belongs to the terminal root** (built, above). It is a narrow exception to what this ADR
+  recommends not building: it is not a role, not a per-thread permission, and it changes nothing for the
+  person at the keyboard or on the tailnet. It removes one hole: a person admitted by a team they do not run
+  could otherwise add accounts to this Inbox, rewrite the allow list, or close the door while signed in at it.
+- **An agent must be told which person wrote the line, by name.** The window and the phone are not enough.
+  This changes step 3 above: `InboxSentFrom`'s account field has to carry a name an agent can answer, and the
+  reader line has to print it next to the window and the phone. `sessionUser` already returns `{ id, email,
+  name }`, so the name exists at the door and is thrown away there.
+- **The contact list is the next step, not this one.** The first cut puts a name on the account; the record of
+  who is who, with a role, a profile and how to reach them, follows when threads hold more than one person and
+  an agent has to choose whom to address.
+
+Unchanged by that answer, and still the ADR's to decide: whether an Inbox stays one Inbox (model A, the
+recommendation) or becomes one per account (model B, the seam table). Nothing decided above commits to B.
