@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { authCookieName } from "@plannotator/shared/inbox/auth-door";
 import { AUTH_JS } from "./inbox-auth-login";
 import { openInboxAuth, type InboxAuthInstance } from "./inbox-auth-instance";
 import { startInboxServer, type InboxServer } from "./inbox";
@@ -313,7 +312,8 @@ describe("passkeys at the sign-in door", () => {
     // The counter is what says “this signing happened after that one”. Sending the assertion the
     // person already used must not open the door a second time.
     const replay = await signInWithPasskey(base, key, credentialId, 7);
-    expect(replay.status).toBeGreaterThanOrEqual(400);
+    expect(replay.status).toBe(400);
+    expect(((await replay.json()) as { code: string }).code).toBe("AUTHENTICATION_FAILED");
     const held = new Jar();
     held.absorb(replay);
     expect(held.session).toBe("");
@@ -328,7 +328,8 @@ describe("passkeys at the sign-in door", () => {
     const credentialId = String((await passkeyRows())[0].credentialID);
 
     const refused = await signInWithPasskey(base, makeFixtureKey(), credentialId, 1);
-    expect(refused.status).toBeGreaterThanOrEqual(400);
+    expect(refused.status).toBe(401);
+    expect(((await refused.json()) as { code: string }).code).toBe("AUTHENTICATION_FAILED");
     const held = new Jar();
     held.absorb(refused);
     expect(held.session).toBe("");
@@ -342,10 +343,15 @@ describe("passkeys at the sign-in door", () => {
     expect((await registerPasskey(base, jar, key, "Pixel laptop")).status).toBe(200);
     const credentialId = String((await passkeyRows())[0].credentialID);
 
-    expect((await signInWithPasskey(base, key, credentialId, 1, "somewhere-else.example")).status).toBeGreaterThanOrEqual(400);
+    // The relying party is a name, and the plugin checks it before anything else: “another site” is
+    // refused by the rpId hash, the origin, or both, and never by the key itself.
+    const wrongRpId = await signInWithPasskey(base, key, credentialId, 1, "somewhere-else.example");
+    expect(wrongRpId.status).toBe(400);
+    expect(((await wrongRpId.json()) as { code: string }).code).toBe("AUTHENTICATION_FAILED");
 
     const wrongOrigin = await signInWithPasskey(base, key, credentialId, 2, HOST, "https://somewhere-else.example");
-    expect(wrongOrigin.status).toBeGreaterThanOrEqual(400);
+    expect(wrongOrigin.status).toBe(400);
+    expect(((await wrongOrigin.json()) as { code: string }).code).toBe("AUTHENTICATION_FAILED");
     const held = new Jar();
     held.absorb(wrongOrigin);
     expect(held.session).toBe("");
@@ -364,7 +370,8 @@ describe("passkeys at the sign-in door", () => {
     expect(listedTheirs.status).toBe(200);
     expect(listedTheirs.body.passkeys).toEqual([]);
     const stolen = await removePasskey(base, theirs.header, String(foreign.id));
-    expect(stolen.status).toBeGreaterThanOrEqual(400);
+    expect(stolen.status).toBe(404);
+    expect(String(stolen.body.code)).toBe("not_here");
     expect(await passkeyRows()).toHaveLength(1);
 
     // With no session at all, neither endpoint answers.
@@ -373,65 +380,38 @@ describe("passkeys at the sign-in door", () => {
   }, 60_000);
 
   test("an account whose only way in is passkeys keeps its last one", async () => {
-    const { base } = await startWithAccounts();
+    // An account with a password can lose its passkey: there is still another way in.
+    const { base } = await startWithAccounts([ME, "keys-only@example.com"]);
     await seed(ME);
     const jar = await signInJar(base, ME);
     expect((await registerPasskey(base, jar, makeFixtureKey(), "Pixel laptop")).status).toBe(200);
-
-    // This account also has a password, so one passkey can go: the person is not locked out.
-    const keys = listed((await listPasskeys(base, jar.header)).body);
-    expect((await removePasskey(base, jar.header, String(keys[0].id))).status).toBe(200);
+    const mine = listed((await listPasskeys(base, jar.header)).body);
+    expect((await removePasskey(base, jar.header, String(mine[0].id))).status).toBe(200);
     expect(await passkeyRows()).toHaveLength(0);
 
-    // An account whose only credential is passkeys keeps its last one, whatever the caller asks for.
-    const held = await withInstance(async (instance) => {
-      const ctx = await instance.auth.$context;
-      const user = await ctx.internalAdapter.createUser({ email: "keys-only@example.com", name: "Keys only", emailVerified: true });
-      const rows: string[] = [];
-      for (const label of ["one", "two"]) {
-        const key = makeFixtureKey();
-        const row = (await ctx.adapter.create({
-          model: "passkey",
-          data: {
-            id: `pk_keys_only_${label}`,
-            userId: user.id,
-            name: `Key ${label}`,
-            credentialID: `credential-${label}`,
-            publicKey: key.publicKeySpki,
-            counter: 0,
-            deviceType: "platform",
-            backedUp: false,
-            transports: "internal",
-            aaguid: "00000000-0000-0000-0000-000000000000",
-            createdAt: new Date(),
-          },
-        })) as Record<string, unknown>;
-        rows.push(String(row.id));
-      }
-      return rows;
-    });
-    expect(held).toHaveLength(2);
+    // An account whose only credential is a passkey keeps it. Its address is on the list, and it is
+    // signed in the way it can be, so the request reaches the guard instead of the door turning it
+    // away first: a refusal here has to come from `removePasskey`, not from the allowlist.
+    const keysOnly = "keys-only@example.com";
+    await seed(keysOnly);
+    const owner = await signInJar(base, keysOnly);
+    expect(owner.session).toContain(".");
+    expect((await registerPasskey(base, owner, makeFixtureKey(), "Only key")).status).toBe(200);
+    expect(await passkeyRows()).toHaveLength(1);
 
-    // Nobody can sign in to that account with a password, so the door must not be the way it loses one.
-    const guessed = await request(`${base}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "content-type": "application/json", origin: ORIGIN, "x-forwarded-for": nextClient() },
-      body: JSON.stringify({ email: "keys-only@example.com", password: "not-the-password" }),
-    });
-    expect(guessed.status).toBe(401);
-
-    const ownerToken = await withInstance(async (instance) => {
+    // The password goes, leaving the passkey as the account's one way in.
+    await withInstance(async (instance) => {
       const ctx = await instance.auth.$context;
-      const found = await ctx.internalAdapter.findUserByEmail("keys-only@example.com");
-      // The cookie the door itself sets on an https origin, so the session this test forges is the
-      // one the door actually reads.
-      return (await ctx.internalAdapter.createSession(found!.user.id))?.token ?? "";
+      const found = await ctx.internalAdapter.findUserByEmail(keysOnly);
+      await ctx.internalAdapter.deleteAccounts(found!.user.id);
     });
-    expect(ownerToken).not.toBe("");
-    const removed = await removePasskey(base, `${authCookieName(true)}=${ownerToken}`, held[0]);
-    expect(removed.status).toBeGreaterThanOrEqual(400);
-    expect(removed.body.error).toBeTruthy();
-    expect(await passkeyRows()).toHaveLength(2);
+
+    const held = listed((await listPasskeys(base, owner.header)).body);
+    expect(held).toHaveLength(1);
+    const removed = await removePasskey(base, owner.header, String(held[0].id));
+    expect(removed.status).toBe(409);
+    expect(String(removed.body.code)).toBe("last_way_in");
+    expect(await passkeyRows()).toHaveLength(1);
   }, 60_000);
 
   test("a passkey signs in only as far as the allowlist lets that address in", async () => {
@@ -476,7 +456,8 @@ describe("passkeys at the sign-in door", () => {
     expect((await removePasskey(base, jar.header, String(target?.id ?? ""))).status).toBe(200);
 
     const refused = await signInWithPasskey(base, gone, doomedCredential, 2);
-    expect(refused.status).toBeGreaterThanOrEqual(400);
+    expect(refused.status).toBe(401);
+    expect(((await refused.json()) as { code: string }).code).toBe("PASSKEY_NOT_FOUND");
     const held = new Jar();
     held.absorb(refused);
     expect(held.session).toBe("");
