@@ -42,8 +42,9 @@ enrol one, and would have put door state behind the window's own routes. It uses
 `@better-auth/passkey` 1.7.25 (the release matched to `better-auth` 1.7.25); the door writes no
 ceremony code, and a passkey sign-in makes the same session cookie a password makes, so the
 allowlist, the `CLOSED` routes and the cookie stripping are untouched. The relying party is the
-door's public name (`rpID` = `inboxAuth.host`, origin = `settings.baseUrl`): a passkey belongs to the
-name the person is on, which is why the loopback address cannot use one, and why the page says so under its button.
+door's public name (`rpID` = `inboxAuth.host`, origins = `passkeyOrigins`: `https://<host>` and, when a
+public port is pinned, `https://<host>:<httpsPort>`): a passkey belongs to the name the person is on,
+which is why the loopback address cannot use one, and why the page says so under its button.
 
 **The door lists its own passkeys, and never hands a key back.** `GET /api/inbox/auth/passkeys`
 answers for the session's user, takes no address from the request, and returns a name, a date and

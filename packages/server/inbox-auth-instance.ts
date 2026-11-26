@@ -54,11 +54,12 @@ export interface InboxAuthInstanceOptions {
    */
   host?: string;
   /**
-   * What the browser is asked to sign for: the site a passkey is minted for. Both default to the bare
-   * *name* — never a port: a passkey belongs to `https://<host>` whatever port the door is published at,
-   * and the browser refuses it anywhere else.
+   * What the browser is asked to sign for: the site a passkey is minted for. `rpID` is the bare *name* —
+   * WebAuthn forbids a port there — and `origin` is every address a key may be minted for and come back
+   * from: `https://<host>`, plus `https://<host>:<httpsPort>` when the person pinned a port
+   * (`passkeyOrigins`). Both default to the bare name alone.
    */
-  webauthn?: { rpID?: string; origin?: string };
+  webauthn?: { rpID?: string; origin?: string | string[] };
 }
 
 export interface InboxAuth { email: string; name: string; createdAt: string; lastSeenAt: string | null }
@@ -134,9 +135,11 @@ export async function openInboxAuth(options: InboxAuthInstanceOptions): Promise<
 
   const doorHost = options.host?.trim().toLowerCase().replace(/\.$/, "") || new URL(options.baseUrl).hostname;
   const rpID = options.webauthn?.rpID || doorHost;
-  // A passkey belongs to the name, not to a port: minting one for `https://<host>:4255` would strand it
-  // the moment the publisher picked another port, and a key minted for the bare host can never be
-  // offered at a ported one. The strictness is the point, so the door keeps `origin` explicit.
+  // A passkey belongs to the relying party's name plus the exact origin it was made at, and WebAuthn
+  // forbids a port in `rpID`, so the name is the rpID and the origins are the addresses the door answers
+  // passkeys at: the bare name, and the pinned port when one is written down (`passkeyOrigins`), so a key
+  // registered at either signs in at both. `@better-auth/passkey` takes `string | string[]` here and
+  // hands the list to `@simplewebauthn/server`, which accepts an assertion whose origin is any of them.
   const passkeyOrigin = options.webauthn?.origin ?? `https://${doorHost}`;
 
   /**

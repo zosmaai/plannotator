@@ -23,8 +23,10 @@ export const INBOX_AUTH_PORT_ENV = "PLANNOTATOR_INBOX_AUTH_PORT";
  *
  * What it decides is the address the door calls itself: the URL it prints on its pages, the URL the CLI
  * and Settings show, and the URL written into the registry — for people who want that address pinned to
- * one port. It does not narrow the `Host` allowlist and it does not move a passkey: a passkey belongs to
- * the bare name (`passkeyOrigin`), which no published port can relocate.
+ * one port. It does not narrow the `Host` allowlist. It does decide where a passkey lives: with it set,
+ * keys are minted and accepted at `https://<host>:<port>`, and the bare name keeps accepting them too
+ * (`passkeyOrigin`, `passkeyOrigins`, `doorOffersPasskeys`). Change the pinned port and the keys made at
+ * the old one have to be registered again.
  */
 export const INBOX_AUTH_HTTPS_PORT_ENV = "PLANNOTATOR_INBOX_AUTH_HTTPS_PORT";
 export const INBOX_AUTH_HOST_ENV = "PLANNOTATOR_INBOX_AUTH_HOST";
@@ -138,7 +140,8 @@ export function doorAnswersHost(hostHeader: string | null | undefined, settings:
  * It follows the request rather than a setting because the port TLS ended on is the publisher's business,
  * not the door's: `tailscale serve --https=4255`, Caddy on 8443, TLS at the door itself, or plain 443 all
  * sign people in at the address the person used, with nothing written down. A passkey is deliberately not
- * in this list — it belongs to the bare name (`passkeyOrigin`) and no arrival can move it.
+ * in this list — `passkeyOrigin` and `passkeyOrigins` decide where one lives, from the settings, never
+ * from the arrival.
  */
 export function doorOrigins(hostHeader: string | null | undefined, settings: Pick<InboxAuthSettings, "host">): string[] {
   const host = normalHost(settings.host);
@@ -148,14 +151,33 @@ export function doorOrigins(hostHeader: string | null | undefined, settings: Pic
 }
 
 /**
- * The address a passkey belongs to: this door's name over https, never with a port. A WebAuthn
- * credential is checked against the exact origin it was made for, so a key minted for `https://<host>`
- * can never come back at `https://<host>:4255` — and minting it at that port instead would strand every
- * key the moment the publisher picked a different one. `rpID` is the same name, so one passkey serves
- * every port this door is published at, and the browser decides which of them may use it.
+ * The address a passkey belongs to, from what the door's settings say: `https://<host>` normally, and
+ * `https://<host>:<httpsPort>` when the person pinned a published port — the same address `authDoorUrl`
+ * derives for everything else the door prints, so the words on the passkey pages and the origin the
+ * door mints for cannot disagree.
+ *
+ * A WebAuthn credential is checked against the exact origin it was made for, which is why this follows
+ * the pin rather than the arrival: a key made at `https://<host>` could not come back at
+ * `https://<host>:4255`. Pinning the port deliberately moves the keys there, and it is a setting, not a
+ * discovery, because the door never learns which port its publisher chose. `rpID` stays the bare name
+ * (WebAuthn forbids a port there), and `passkeyOrigins` accepts both addresses, so one key works at the
+ * name and at the pinned port; a key made at one pinned port does not work at another.
  */
-export function passkeyOrigin(settings: Pick<InboxAuthSettings, "host">): string {
-  return `https://${normalHost(settings.host)}`;
+export function passkeyOrigin(settings: Pick<InboxAuthSettings, "host"> & { httpsPort?: number | null }): string {
+  return authDoorUrl(settings) ?? `https://${normalHost(settings.host)}`;
+}
+
+/**
+ * Every `Origin` a key may be minted for and come back from: the bare name, and the pinned port when one
+ * is set. WebAuthn matches on the exact origin, so a person who registered a key before the port was
+ * pinned would otherwise lose it, and one who registers at the pinned address would lose it the moment
+ * they open the bare name — both addresses are this door's, so both are handed to better-auth's passkey
+ * plugin and to `@simplewebauthn/server`, which verify against the list.
+ */
+export function passkeyOrigins(settings: Pick<InboxAuthSettings, "host"> & { httpsPort?: number | null }): string[] {
+  const bare = `https://${normalHost(settings.host)}`;
+  const pinned = passkeyOrigin(settings);
+  return pinned === bare ? [bare] : [bare, pinned];
 }
 
 /** A loopback name: every browser treats `http://127.0.0.1` and `http://localhost` as a secure context. */
@@ -176,9 +198,12 @@ export function isLoopbackHost(host: string): boolean {
  * - a loopback `Host` — http on loopback is a secure context, WebAuthn included. The `Host` allowlist
  *   refuses a loopback name today, because the settings refuse one (`isPublicDnsName`); this is here for
  *   whoever lifts that, and it is pinned at this seam.
- * - otherwise the arrival is at the address the passkeys belong to: this name with no port, or with
- *   `:443`, which is `passkeyOrigin`. A ceremony started at `https://<host>:4255` could only ever fail
- *   WebAuthn's own origin check, so the door says its line instead of running one.
+ * - otherwise the arrival is at the address the passkeys belong to: this name with no port, with `:443`,
+ *   or with exactly the port the person pinned (`passkeyOrigin`, when `httpsPort` is set). Any other port
+ *   is refused, because a key is minted for one exact origin: at a port nobody pinned, the browser would
+ *   either fail WebAuthn's own origin check or take a key made at a *different* pinned port, so the door
+ *   says its line instead of running a ceremony. A key made while one port was pinned does not work at
+ *   another pinned port: changing the pin means registering the keys again.
  *
  * `x-forwarded-proto` is not consulted at all. Anything that can reach this loopback port can write it,
  * and a proxy that genuinely ended TLS sends exactly what a liar sends — the two are not
@@ -193,7 +218,7 @@ export function isLoopbackHost(host: string): boolean {
  */
 export function doorOffersPasskeys(
   headers: Headers,
-  settings: Pick<InboxAuthSettings, "host">,
+  settings: Pick<InboxAuthSettings, "host"> & { httpsPort?: number | null },
   arrival: { tls?: boolean } = {},
 ): boolean {
   if (arrival.tls === true) return true;
@@ -201,7 +226,8 @@ export function doorOffersPasskeys(
   if (!at) return false;
   if (isLoopbackHost(at.host)) return true;
   if (at.host !== normalHost(settings.host)) return false;
-  if (at.port !== null && at.port !== 443) return false;
+  const pinned = settings.httpsPort ?? null;
+  if (at.port !== null && at.port !== 443 && at.port !== pinned) return false;
   return true;
 }
 

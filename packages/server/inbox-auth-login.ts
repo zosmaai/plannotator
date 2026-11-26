@@ -31,8 +31,9 @@ export interface LoginPageOptions {
    */
   address: string;
   /**
-   * The address the passkeys belong to: the name over https, with no port, because that is where a
-   * passkey can be offered back whatever port this door happens to be published at.
+   * The address the passkeys belong to: `passkeyOrigin`, the name over https at the pinned port when one
+   * is written down, and the bare name otherwise. The same address the door mints keys for, so the words
+   * on the page and the origin a key comes back at cannot disagree.
    */
   passkeyAddress: string;
   /** Where to go after signing in: already through `safeNextPath`. */
@@ -46,7 +47,7 @@ export interface LoginPageOptions {
  * another way through this door, and a person who is not signed in cannot reach the Inbox at all.
  */
 export interface PasskeyPageOptions {
-  /** The address the passkeys belong to: the name over https, never a port. */
+  /** The address the passkeys belong to (`passkeyOrigin`): the name at the pinned port, or with no port. */
   address: string;
   /** Where the page's own links go back to: already through `safeNextPath`. */
   next: string;
