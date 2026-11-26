@@ -300,15 +300,16 @@ read it: `docs/agent-guides/inbox-sign-in.md`, "Several accounts, one Inbox".
 
 What A commits to, against the numbered steps under "Smallest honest first step":
 
-- Step 1 (this ADR) and step 5 (the guide paragraph) are on `main`.
-- Step 3, the account on the line it wrote, is in review as zosmaai/plannotator#7, and is what answers the
-  decided requirement that an agent gets the writer's name by name. When it merges, the guide's "nothing on
-  a thread says which account wrote it" changes with it — that sentence describes the state before it.
-- Still unbuilt: step 2, the `auth_door_request` note (`packages/server/inbox-auth-door.ts:255`) gains
-  `account`, and the door's `note` is wired whether or not debug logging is on — today it is
+- Steps 1, 3 and 5 are on `main`: this ADR, the guide paragraph, and the account's name on the line it wrote
+  (zosmaai/plannotator#7, merged 26 November). Step 3 is what answers the decided requirement that an agent
+  gets the writer's name by name, and step 5 moved with it: the guide now says a line names the place and,
+  for a line this door accepted itself, the account — and says plainly which lines still name no account.
+- What is left of A is steps 2 and 4. Step 2, the `auth_door_request` note
+  (`packages/server/inbox-auth-door.ts:255`) gains `account`, and the door's `note` is wired whether or not debug logging is on — today it is
   `note: debugLog ? … : undefined` where the account door is built (`packages/server/inbox.ts:8852`); and
   step 4, one line in the window and on the phone, "signed in as ada@…", through the one-way identity header
-  the findings call for.
+  the findings call for. Neither is on the critical path for anything else; both wait on zosmaai/plannotator#8,
+  which changes the same door dispatch, merging first.
 
 Numbers here are the lines on `main` as of 26 November 2026; the numbers in the costing above were the lines
 when the door merged, and drift with every merge, so trust the symbol names.
