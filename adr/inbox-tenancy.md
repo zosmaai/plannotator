@@ -2,9 +2,13 @@
 
 Updated: 2026-11-26
 
-Status: accepted on 25 November 2026. The owner chose model A: one Inbox, every account the owner mints an
-owner inside it, and the account named in the record. What follows is the costing that choice was made
-against, and the steps choosing A commits to.
+Status: proposed. The model — one Inbox where every account the owner mints is an owner inside it, or one
+Inbox per account — is still the owner's to pick, and nothing merged so far commits to either. Two questions
+*around* it have been answered, and they are recorded under "Decided, and what is still open" rather than
+here: who may change how you get in (the owner alone, from this computer), and how big the first cut of
+"who wrote this line" is (just the name on the account). Neither one chooses a model: the door, the
+owner-only rule and the name on the line would all be true of an Inbox each too. What follows is the costing
+a choice would be made against.
 
 ## Status / Context
 
