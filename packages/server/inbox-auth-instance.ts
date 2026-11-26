@@ -23,8 +23,13 @@ import { AUTH_COOKIE_PREFIX, INBOX_AUTH_SECRET_ENV, doorOrigins, isAllowedAuthEm
 
 /** Seven days, the page's own promise. */
 export const AUTH_SESSION_SECONDS = 7 * 24 * 60 * 60;
-/** Shorter than better-auth's default of 8: this is one person's Inbox, not a public sign-up service. */
-export const AUTH_MIN_PASSWORD_LENGTH = 12;
+/**
+ * Ten, the owner's own rule: `Firstname@2026` (`Arjun@2026`, `Pranay@2026`), which the shortest first names make
+ * exactly ten. Ten is longer than better-auth's default of 8 and shorter than the 12 this door used to ask for;
+ * what makes it safe is the attempt limit below (ten sign-ins per address per five minutes on `/sign-in/email`),
+ * not the length alone.
+ */
+export const AUTH_MIN_PASSWORD_LENGTH = 10;
 const SECRET_FILE = "auth-secret";
 const DATABASE_FILE = "auth.sqlite";
 
