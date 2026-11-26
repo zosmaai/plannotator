@@ -52,10 +52,13 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let acks: { id: string; on: boolean; reaction: InboxReaction | null | undefined }[] = [];
 let posts: { path: string; body: Record<string, unknown> }[] = [];
+/** The agent each 👍 or emoji names (the toast's "Goes to <agent>"). */
+let ackAgents: string[] = [];
 
 beforeEach(() => {
   if (!hasDom) return;
   acks = [];
+  ackAgents = [];
   posts = [];
   resetSavedReactionsForTests(SAVED);
   resetSkillCatalogCache();
@@ -115,7 +118,10 @@ async function render(t: InboxThread, extra: { phone?: boolean } = {}) {
         file={null}
         onOpenFile={() => {}}
         onOpenGuide={() => {}}
-        onAck={(id, on, _agent, reaction) => acks.push({ id, on, reaction })}
+        onAck={(id, on, agent, reaction) => {
+          acks.push({ id, on, reaction });
+          ackAgents.push(agent);
+        }}
         phone={extra.phone ?? false}
       />,
     );
@@ -395,6 +401,20 @@ test.skipIf(!hasDom)('a phone, as it ships (`PHONE_HOLD.opensSheet` false): a ho
   expect(press.defaultPrevented).toBe(false);
 });
 
+test.skipIf(!hasDom)('a phone (no face): “All reactions” in an earlier message’s ⋯ opens the tray, and its emoji reacts on that message', async () => {
+  await render(sample(), { phone: true });
+  expect(face(M3)).toBeNull();
+  const more = () => document.querySelector<HTMLButtonElement>(`[data-message-more="${M3}"]`);
+  await act(async () => more()!.click());
+  await until(() => !!document.querySelector(`[data-message-menu="${M3}"] [data-menu-reaction="all"]`), 'the message’s sheet');
+  await act(async () => document.querySelector<HTMLElement>(`[data-message-menu="${M3}"] [data-menu-reaction="all"]`)!.click());
+  await until(() => !!document.querySelector('[data-reaction-tray]'), 'the full tray');
+  // Opened from that message's ⋯, in its place.
+  expect(document.querySelector('[data-reaction-tray]')!.closest('.ib-react-pos') !== null).toBe(true);
+  await act(async () => document.querySelector<HTMLElement>('[data-reaction-tray] [data-reaction="saved-0"]')!.click());
+  expect(acks).toEqual([{ id: M3, on: true, reaction: { emoji: '🎉', label: 'Ship it' } }]);
+});
+
 test.skipIf(!hasDom)('a phone with `PHONE_HOLD.opensSheet` on: a still hold opens the message’s sheet', async () => {
   PHONE_HOLD.opensSheet = true;
   try {
@@ -440,4 +460,20 @@ test.skipIf(!hasDom)('a skill emoji’s card on a linked machine’s thread read
   expect(read).toMatchObject({ description: 'Run it and show me', missing: false });
   expect(read.excerpt).toContain('Run the change for real');
   expect((await skillPreviewText('test-it-nowhere', far)).missing).toBe(true);
+});
+
+test.skipIf(!hasDom)("a script's message (no session, host or name): its face, its 👍 and its skill emoji name Script, as its head does", async () => {
+  const script: InboxAuthor = { kind: 'agent', host: null, session: null, name: null };
+  await render({ ...sample(), messages: [message(M1, script, 'Disk at 91% on node 3.', 1), message(M2, script, 'Disk at 93% on node 3.', 2)] });
+  await hoverFace(M1);
+  await until(() => !!strip(M1), 'the face opened');
+  expect(strip(M1)!.getAttribute('aria-label')).toBe("React to Script's message");
+  await act(async () => strip(M1)!.querySelector<HTMLButtonElement>('button')!.click());
+  expect(acks).toEqual([{ id: M1, on: true, reaction: null }]);
+  expect(ackAgents).toEqual(['Script']);
+  // The menu's skill emoji: said sent to Script.
+  await rightClick(article(M2).querySelector('.ib-msg')!);
+  await until(() => !!menu(), 'the message menu');
+  await act(async () => (menu()!.querySelector('[data-menu-reaction="😵‍💫"]') as HTMLElement).click());
+  await until(() => document.querySelector('[data-fold-live]')?.textContent === 'Sent /bro to Script.', 'the skill said sent to Script');
 });
