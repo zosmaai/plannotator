@@ -459,6 +459,8 @@ button.ib-mut { border-radius: 6px; }
 @media (prefers-reduced-motion: reduce) {
   .ib-brand .ib-tater-strip { animation: none; }
 }
+.ib-brand .ib-brandmark { width: 21px; height: 21px; flex: none; display: flex; align-items: center; justify-content: center; color: var(--ib-zosma, #017cf3); }
+.ib-brand .ib-brandmark svg { height: 100%; width: 100%; display: block; }
 .ib-brand b { font-weight: 650; font-size: var(--ib-fs-15, 15px); letter-spacing: -0.005em; }
 .ib-brand span { color: var(--muted-foreground); font-weight: 500; font-size: var(--ib-fs-15, 15px); margin-left: -4px; }
 .ib-nav { display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 9px; border-radius: var(--ib-rl-sm-s, 7px); color: var(--foreground); font-size: var(--ib-fs-14, 14px); width: 100%; text-align: left; transition: var(--ib-fade-s, var(--ib-ui-fade)); }

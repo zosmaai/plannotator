@@ -1,7 +1,8 @@
 /**
  * The Inbox's favicon: Settings → General → Appearance → Favicon, the same
- * three choices as plan review's Theme tab (Glass, Yellow, Face;
- * FAVICON_STYLE_CHOICES in @plannotator/core/favicon).
+ * choices as plan review's Theme tab (Zosma, Glass, Yellow, Face;
+ * FAVICON_STYLE_CHOICES in @plannotator/core/favicon). Zosma is this fork's own
+ * mark and the default.
  *
  * One shared choice: config.json `favicon`, which plan review, code review
  * and annotate write through POST /api/config and which the Inbox writes
