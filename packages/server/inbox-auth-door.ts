@@ -37,6 +37,7 @@ import {
   markFromAuthDoor,
   PASSKEY_API_PATH,
   PASSKEY_JS_PATH,
+  doorBindAddress,
   PASSKEY_PAGE_PATH,
   passkeyOrigin,
   passkeyOrigins,
@@ -369,9 +370,10 @@ export function createInboxAuthDoor(context: InboxAuthDoorContext) {
         return;
       }
       instance = made;
+      const bind = doorBindAddress();
       try {
         listener = Bun.serve({
-          hostname: "127.0.0.1",
+          hostname: bind,
           port: active.port,
           idleTimeout: 0,
           maxRequestBodySize: context.maxRequestBodySize,
@@ -382,7 +384,7 @@ export function createInboxAuthDoor(context: InboxAuthDoorContext) {
         instance = null;
         const code = (error as NodeJS.ErrnoException)?.code ?? "";
         const busy = /EADDRINUSE|in use/i.test(`${code} ${error instanceof Error ? error.message : String(error)}`);
-        return fail(busy ? `Port ${active.port} is in use by another program.` : `Could not listen on 127.0.0.1:${active.port}.`);
+        return fail(busy ? `Port ${active.port} is in use by another program.` : `Could not listen on ${bind}:${active.port}.`);
       }
       settings = active;
       state.url = `${active.baseUrl}/`;

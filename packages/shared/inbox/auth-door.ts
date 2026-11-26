@@ -34,6 +34,27 @@ export const INBOX_AUTH_ALLOW_ENV = "PLANNOTATOR_INBOX_AUTH_ALLOW";
 /** The secret better-auth signs sessions with. Generated into the data folder when unset. */
 export const INBOX_AUTH_SECRET_ENV = "PLANNOTATOR_AUTH_SECRET";
 export const DEFAULT_INBOX_AUTH_PORT = 19501;
+/**
+ * The address the door listens on. `127.0.0.1` is the right default because the thing that publishes
+ * the door (`tailscale serve`, Cloudflare Access, a TLS proxy) usually runs on this same machine.
+ *
+ * It is the wrong address when that proxy runs somewhere else and reaches this machine over its own
+ * network: in a container or a VM, `tailscale serve` on the host proxies to the container's address,
+ * while a listener bound to `127.0.0.1` inside the container answers its own loopback only. The
+ * published address then answers 502 and the door logs nothing, because no request ever reaches it.
+ * `PLANNOTATOR_INBOX_AUTH_BIND=0.0.0.0` (or the machine's address) is what such a setup needs.
+ *
+ * Binding wider does not widen who may come in: `Host` is still checked by `doorAnswersHost` and
+ * every request still needs a session.
+ */
+export const INBOX_AUTH_BIND_ENV = "PLANNOTATOR_INBOX_AUTH_BIND";
+export const DEFAULT_INBOX_AUTH_BIND = "127.0.0.1";
+
+/** The address the door's listener takes: `PLANNOTATOR_INBOX_AUTH_BIND`, or loopback when it is unset or blank. */
+export function doorBindAddress(env: NodeJS.ProcessEnv = process.env): string {
+  const asked = (env[INBOX_AUTH_BIND_ENV] ?? "").trim();
+  return asked === "" ? DEFAULT_INBOX_AUTH_BIND : asked;
+}
 /** Better-auth's own base path; nothing else may take it. */
 export const AUTH_BASE_PATH = "/api/auth";
 export const AUTH_LOGIN_PATH = "/login";
