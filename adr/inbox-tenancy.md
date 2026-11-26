@@ -1,8 +1,10 @@
 # Inbox: one Inbox, or one each?
 
-Updated: 2026-11-25
+Updated: 2026-11-26
 
-Status: proposed. The owner decides; this document is the costing, not the change.
+Status: accepted on 25 November 2026. The owner chose model A: one Inbox, every account the owner mints an
+owner inside it, and the account named in the record. What follows is the costing that choice was made
+against, and the steps choosing A commits to.
 
 ## Status / Context
 
@@ -291,5 +293,26 @@ Answered on 25 November 2026:
   who is who, with a role, a profile and how to reach them, follows when threads hold more than one person and
   an agent has to choose whom to address.
 
-Unchanged by that answer, and still the ADR's to decide: whether an Inbox stays one Inbox (model A, the
-recommendation) or becomes one per account (model B, the seam table). Nothing decided above commits to B.
+**One Inbox, or one each: model A**, answered on 25 November 2026. One Inbox; every account the owner mints
+is an owner inside it; the terminal stays the root. Model B stays costed above and is reopened only if a
+real second tenant turns up who must not read someone else's threads. The state is written down where people
+read it: `docs/agent-guides/inbox-sign-in.md`, "Several accounts, one Inbox".
+
+What A commits to, against the numbered steps under "Smallest honest first step":
+
+- Step 1 (this ADR) and step 5 (the guide paragraph) are on `main`.
+- Step 3, the account on the line it wrote, is in review as zosmaai/plannotator#7, and is what answers the
+  decided requirement that an agent gets the writer's name by name. When it merges, the guide's "nothing on
+  a thread says which account wrote it" changes with it — that sentence describes the state before it.
+- Still unbuilt: step 2, the `auth_door_request` note (`packages/server/inbox-auth-door.ts:255`) gains
+  `account`, and the door's `note` is wired whether or not debug logging is on — today it is
+  `note: debugLog ? … : undefined` where the account door is built (`packages/server/inbox.ts:8852`); and
+  step 4, one line in the window and on the phone, "signed in as ada@…", through the one-way identity header
+  the findings call for.
+
+Numbers here are the lines on `main` as of 26 November 2026; the numbers in the costing above were the lines
+when the door merged, and drift with every merge, so trust the symbol names.
+
+A changes no permission and adds no gate: the allowlist stays the whole boundary, and the terminal the only
+place that mints or removes an account. If a real tenant appears, cost model B again then, with that user in
+front of you.
