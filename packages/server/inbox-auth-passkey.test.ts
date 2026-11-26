@@ -56,9 +56,22 @@ function freePort(): number {
 /** A request the way a named tunnel forwards it: to the loopback port, with the public name in Host. */
 function request(url: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
-  headers.set("Host", HOST);
+  // The name the publisher forwards: the bare name unless a test is standing at a port (`BARE`, `PORTED`).
+  if (!headers.has("host")) headers.set("Host", HOST);
   return fetch(url, { ...init, headers });
 }
+
+/**
+ * Where the browser stands: the `Origin` its page was served from, and the `Host` the publisher forwards.
+ * `BARE` is `https://<host>` with no port; `PORTED` is the address `tailscale serve --https=4255` gives.
+ */
+interface At {
+  origin: string;
+  host: string;
+}
+
+const BARE: At = { origin: ORIGIN, host: HOST };
+const PORTED: At = { origin: `https://${HOST}:4255`, host: `${HOST}:4255` };
 
 /** The cookies the door set, kept the way a browser keeps them: a ceremony spans two requests. */
 class Jar {
@@ -99,9 +112,12 @@ async function waitForDoor(base: string): Promise<void> {
 }
 
 /** An Inbox whose door is on, at a known port, with the address its door answers at. */
-async function startWithAccounts(allow: readonly string[] = [ME]): Promise<{ base: string }> {
+async function startWithAccounts(allow: readonly string[] = [ME], options: { httpsPort?: number } = {}): Promise<{ base: string }> {
   const port = freePort();
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxAuth: { on: true, host: HOST, allow: [...allow], port } }));
+  writeFileSync(
+    join(dataDir, "config.json"),
+    JSON.stringify({ inboxAuth: { on: true, host: HOST, allow: [...allow], port, ...(options.httpsPort ? { httpsPort: options.httpsPort } : {}) } }),
+  );
   const inbox = await startInboxServer({ dataDir, htmlContent: HTML });
   servers.push(inbox);
   const base = `http://127.0.0.1:${port}`;
@@ -149,11 +165,11 @@ function nextClient(): string {
   return `203.0.113.${client}`;
 }
 
-async function signInJar(base: string, email: string, password = PASSWORD): Promise<Jar> {
+async function signInJar(base: string, email: string, password = PASSWORD, at: At = BARE): Promise<Jar> {
   const jar = new Jar();
   const answer = await request(`${base}/api/auth/sign-in/email`, {
     method: "POST",
-    headers: { "content-type": "application/json", origin: ORIGIN, "x-forwarded-for": nextClient() },
+    headers: { Host: at.host, "content-type": "application/json", origin: at.origin, "x-forwarded-for": nextClient() },
     body: JSON.stringify({ email, password }),
   });
   jar.absorb(answer);
@@ -166,17 +182,18 @@ const signIn = async (base: string, email: string, password = PASSWORD): Promise
  * better-auth's routes as the door's page calls them: same origin, the page's cookies. A ceremony
  * spans two requests, so anything the answer sets is kept in the jar the way a browser keeps it.
  */
-async function authFetch(base: string, path: string, init: RequestInit, jar: Jar): Promise<Response> {
+async function authFetch(base: string, path: string, init: RequestInit, jar: Jar, at: At = BARE): Promise<Response> {
   const headers = new Headers(init.headers);
-  headers.set("origin", ORIGIN);
+  headers.set("origin", at.origin);
+  headers.set("Host", at.host);
   if (jar.header) headers.set("cookie", jar.header);
   const answer = await request(`${base}${path}`, { ...init, headers });
   jar.absorb(answer);
   return answer;
 }
 
-async function registerPasskey(base: string, jar: Jar, key: FixtureKey, name?: string): Promise<{ status: number; body: Record<string, unknown> }> {
-  const started = await authFetch(base, "/api/auth/passkey/generate-register-options", { method: "GET" }, jar);
+async function registerPasskey(base: string, jar: Jar, key: FixtureKey, name?: string, at: At = BARE): Promise<{ status: number; body: Record<string, unknown> }> {
+  const started = await authFetch(base, "/api/auth/passkey/generate-register-options", { method: "GET" }, jar, at);
   const options = (await started.json()) as Record<string, unknown>;
   if (started.status !== 200) return { status: started.status, body: options };
   const challenge = String(options.challenge ?? "");
@@ -188,16 +205,25 @@ async function registerPasskey(base: string, jar: Jar, key: FixtureKey, name?: s
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ response: JSON.parse(registrationResponse({ key, rpId: HOST, origin: ORIGIN, challenge })), name }),
+      body: JSON.stringify({ response: JSON.parse(registrationResponse({ key, rpId: HOST, origin: at.origin, challenge })), name }),
     },
     jar,
+    at,
   );
   return { status: answer.status, body: (await answer.json()) as Record<string, unknown> };
 }
 
-async function signInWithPasskey(base: string, key: FixtureKey, credentialId: string, counter: number, rpId = HOST, origin = ORIGIN): Promise<Response> {
+async function signInWithPasskey(
+  base: string,
+  key: FixtureKey,
+  credentialId: string,
+  counter: number,
+  rpId = HOST,
+  origin = ORIGIN,
+  at: At = BARE,
+): Promise<Response> {
   const jar = new Jar();
-  const started = await authFetch(base, "/api/auth/passkey/generate-authenticate-options", { method: "GET" }, jar);
+  const started = await authFetch(base, "/api/auth/passkey/generate-authenticate-options", { method: "GET" }, jar, at);
   expect(started.status).toBe(200);
   const options = (await started.json()) as Record<string, unknown>;
   const challenge = String(options.challenge ?? "");
@@ -211,6 +237,7 @@ async function signInWithPasskey(base: string, key: FixtureKey, credentialId: st
       body: JSON.stringify({ response: JSON.parse(assertionResponse({ key, rpId, origin, challenge, credentialId, counter })) }),
     },
     jar,
+    at,
   );
 }
 
@@ -615,14 +642,58 @@ describe("passkeys at the sign-in door", () => {
     expect(location.gone).toBe("/inbox");
   }, 30_000);
 
-  test("a door published at a port keeps its passkeys on the bare name", async () => {
-    // The owner's setup: `tailscale serve --https=4255` publishes the door at
-    // `https://inbox.example.com:4255`, and nothing in config.json mentions 4255. Password sign-in
-    // follows the request (pinned in `inbox-auth-door.test.ts`). Passkeys do not follow it, and the reason
-    // is not a policy choice: WebAuthn checks a key against the exact origin it was minted for, so a key
-    // made for `https://inbox.example.com:4255` could never come back at the bare name, and would be
-    // stranded the moment the publisher picked a different port. The door mints for `https://<host>` and
-    // says so at every other port, rather than starting a ceremony the browser would then refuse.
+  test("a pinned port puts the passkeys there, and the bare name still takes them", async () => {
+    // The owner's decision, in their words: make the keys follow the pinned port, and if the port ever
+    // changes, every key has to be registered again. With `inboxAuth.httpsPort: 4255` written down, a key
+    // is minted for `https://<host>:4255` and for the bare name, and the same key comes back at either —
+    // both addresses are handed to the plugin (`passkeyOrigins`), while `rpID` stays the bare name because
+    // WebAuthn forbids a port there. A third port is still nothing at all.
+    const { base } = await startWithAccounts([ME], { httpsPort: 4255 });
+    await seed(ME);
+
+    // A key registered at the bare name signs in at the pinned port.
+    const atName = makeFixtureKey();
+    expect((await registerPasskey(base, await signInJar(base, ME), atName, "At the name")).status).toBe(200);
+    const nameRow = (await passkeyRows()).find((row) => String(row.name) === "At the name");
+    expect(nameRow).toBeDefined();
+    const nameAtPort = await signInWithPasskey(base, atName, String(nameRow?.credentialID ?? ""), 1, HOST, PORTED.origin, PORTED);
+    expect(nameAtPort.status).toBe(200);
+    const portedSession = new Jar();
+    portedSession.absorb(nameAtPort);
+    expect(portedSession.session).toContain(".");
+    // And the session it opened is good at the address it was made at — the half that used to fail.
+    const window = await request(`${base}/`, { headers: { Host: PORTED.host, cookie: portedSession.header }, redirect: "manual" });
+    expect(window.status).toBe(200);
+
+    // A key registered at the pinned port signs in at the bare name.
+    const atThePort = makeFixtureKey();
+    expect((await registerPasskey(base, await signInJar(base, ME, PASSWORD, PORTED), atThePort, "At the port", PORTED)).status).toBe(200);
+    const portRow = (await passkeyRows()).find((row) => String(row.name) === "At the port");
+    expect(portRow).toBeDefined();
+    const portAtName = await signInWithPasskey(base, atThePort, String(portRow?.credentialID ?? ""), 1);
+    expect(portAtName.status).toBe(200);
+    const bareSession = new Jar();
+    bareSession.absorb(portAtName);
+    expect(bareSession.session).toContain(".");
+
+    // One port is pinned, not any port: `:8443` is refused before better-auth sees it, and the door's own
+    // line names the address a key would have to be made at.
+    const elsewhere = await fetch(`${base}/api/auth/passkey/generate-authenticate-options`, {
+      method: "GET",
+      headers: { Host: `${HOST}:8443`, origin: `https://${HOST}:8443`, "x-forwarded-for": nextClient() },
+    });
+    expect(elsewhere.status).toBe(403);
+    const refused = (await elsewhere.json()) as { code: string; error: string };
+    expect(refused.code).toBe("insecure_connection");
+    expect(refused.error).toContain(`Passkeys need https://${HOST}:4255`);
+  }, 60_000);
+
+  test("with no port pinned, the keys stay on the bare name and a port is refused", async () => {
+    // The owner's setup before this: `tailscale serve --https=4255` publishes the door at
+    // `https://inbox.example.com:4255`, and nothing in config.json mentions 4255. Nothing written down
+    // means nothing to follow: password sign-in answers at the address the request arrived at (pinned in
+    // `inbox-auth-door.test.ts`), and the keys stay at `https://<host>`. The door says so at a port rather
+    // than starting a ceremony the browser could only fail.
     const { base } = await startWithAccounts();
     await seed(ME);
     const at = `https://${HOST}:4255`;
@@ -638,9 +709,9 @@ describe("passkeys at the sign-in door", () => {
     jar.absorb(signed);
     expect(signed.status).toBe(200);
 
-    // A passkey ceremony there is refused before better-auth sees it, because the address is the port and
-    // not the name a key belongs to; `x-forwarded-proto` plays no part in the answer either way, so a
-    // self-asserted `https` from the same request changes nothing.
+    // A passkey ceremony there is refused before better-auth sees it, because the port is not where these
+    // keys live; `x-forwarded-proto` plays no part in the answer either way, so a self-asserted `https`
+    // from the same request changes nothing.
     for (const extra of [{}, { "x-forwarded-proto": "https" }, { "x-forwarded-proto": "https", "x-forwarded-host": HOST }]) {
       const started = await fetch(`${base}/api/auth/passkey/generate-register-options`, { method: "GET", headers: headers({ cookie: jar.header, ...extra }) });
       expect(started.status).toBe(403);
@@ -652,12 +723,10 @@ describe("passkeys at the sign-in door", () => {
     // it mints signs in there.
     const bare = await signInJar(base, ME);
     const key = makeFixtureKey();
-    const registered = await registerPasskey(base, bare, key, "Pixel laptop");
-    expect(registered.status).toBe(200);
+    expect((await registerPasskey(base, bare, key, "Pixel laptop")).status).toBe(200);
     const rows = await passkeyRows();
     expect(rows).toHaveLength(1);
-    const row = rows[0];
-    expect((await signInWithPasskey(base, key, String(row.credentialID), 1)).status).toBe(200);
+    expect((await signInWithPasskey(base, key, String(rows[0].credentialID), 1)).status).toBe(200);
 
     // And that key is not offered at the port: the door answers the ceremony routes there with its own
     // refusal, which is what the person needs to see instead of a browser that fails mid-ceremony.

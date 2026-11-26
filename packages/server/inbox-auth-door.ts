@@ -39,6 +39,7 @@ import {
   PASSKEY_JS_PATH,
   PASSKEY_PAGE_PATH,
   passkeyOrigin,
+  passkeyOrigins,
   resolveInboxAuth,
   safeNextPath,
   withoutAuthCookies,
@@ -167,7 +168,7 @@ export function createInboxAuthDoor(context: InboxAuthDoorContext) {
    * What a page calls this Inbox: the name and the port this very request arrived at, which is the
    * address in the person's address bar. A request that carried no `Host` at all (a local health check)
    * falls back to the address from the settings. Passkeys are aimed elsewhere — at `passkeyOrigin`, the
-   * bare name — and the page says so on its own line.
+   * name with the pinned port when one is written down — and the page says so on its own line.
    */
   const doorAddress = (active: InboxAuthSettings, req: Request) => req.headers.get("host")?.trim() || new URL(active.baseUrl).host;
 
@@ -235,9 +236,10 @@ export function createInboxAuthDoor(context: InboxAuthDoorContext) {
       if (req.headers.get("sec-fetch-site")?.trim().toLowerCase() === "cross-site") {
         return jsonError(403, "forbidden_origin", "That sign-in did not come from this Inbox's own page.");
       }
-      // A passkey ceremony needs a page the browser considers secure, and it can only run at the address
-      // the key belongs to: `passkeyOrigin`, the bare name. Started anywhere else it would fail WebAuthn's
-      // own origin check, so the door refuses it here and lets its own line say what to use instead.
+      // A passkey ceremony needs a page the browser considers secure, and it can only run at an address
+      // the key belongs to: `passkeyOrigin`, the name at the pinned port when one is written down, at
+      // `:443`, or with no port at all. Started anywhere else it would fail WebAuthn's own origin check,
+      // so the door refuses it here and lets its own line say what to use instead.
       // Password sign-in at any port is unaffected.
       if (path.startsWith(`${AUTH_BASE_PATH}/passkey`) && !doorOffersPasskeys(req.headers, active)) {
         return jsonError(403, "insecure_connection", `Passkeys need ${passkeyOrigin(active)}. Sign in with the password here, or use that address.`);
@@ -272,14 +274,15 @@ export function createInboxAuthDoor(context: InboxAuthDoorContext) {
     // whose passkeys it wants, and they never hand a stored key back — only a name, a date and the
     // door's own row id.
     //
-    // A passkey ceremony needs a page the browser considers secure, and only the address the key belongs
-    // to has that claim: `passkeyOrigin`, the bare name, at `:443` or with no port at all. At any other
-    // port the ceremony would fail WebAuthn's own origin check, and on an arrival a proxy reports as
-    // plain HTTP it would fail inside `navigator.credentials` — so the passkey paths answer here rather
-    // than rendering a page whose button cannot work. The message names the bare address, because that
-    // is where the keys live whatever port this door is published at. The password sign-in above is
-    // untouched, and so is the window below: a proxy may forward its own loopback hop as `http` and still
-    // be serving the person TLS, and only a ceremony needs the page to be secure.
+    // A passkey ceremony needs a page the browser considers secure, and only the addresses the key
+    // belongs to have that claim: `passkeyOrigin`, the name at the pinned port when one is written down,
+    // at `:443`, or with no port at all. At any other port the ceremony would fail WebAuthn's own origin
+    // check, and on an arrival a proxy reports as plain HTTP it would fail inside
+    // `navigator.credentials` — so the passkey paths answer here rather than rendering a page whose
+    // button cannot work. The message names `passkeyOrigin`, because that is where the keys live. The
+    // password sign-in above is untouched, and so is the window below: a proxy may forward its own
+    // loopback hop as `http` and still be serving the person TLS, and only a ceremony needs the page to
+    // be secure.
     const isPasskeyPath = path === PASSKEY_PAGE_PATH || path.startsWith(`${PASSKEY_PAGE_PATH}/`) || path === PASSKEY_API_PATH || path.startsWith(`${PASSKEY_API_PATH}/`);
     if (isPasskeyPath && !doorOffersPasskeys(req.headers, active)) {
       return jsonError(403, "insecure_connection", `Passkeys need ${passkeyOrigin(active)}. Sign in with the password here, or use that address.`);
@@ -354,7 +357,7 @@ export function createInboxAuthDoor(context: InboxAuthDoorContext) {
               baseUrl: active.baseUrl,
               host: active.host,
               allow: active.allow,
-              webauthn: { rpID: active.host, origin: passkeyOrigin(active) },
+              webauthn: { rpID: active.host, origin: passkeyOrigins(active) },
             });
       } catch (error) {
         if (mine === generation) fail(`Could not open the accounts in ${context.dataDir}: ${error instanceof Error ? error.message : String(error)}`);
