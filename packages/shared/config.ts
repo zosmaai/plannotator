@@ -842,6 +842,15 @@ export interface PlannotatorConfig {
     host?: string;
     allow?: string[];
     port?: number;
+    /**
+     * The port the public address carries when your proxy ends TLS there rather than at 443 —
+     * `4255` for `tailscale serve --https=4255`, where people sign in at
+     * `https://inbox.example.com:4255`. Passkeys are minted for that address, so leaving this
+     * out while publishing at a port is what makes the door refuse its own address with
+     * `INVALID_ORIGIN`. Leave it absent when TLS ends at 443; null is the same as absent (a save that
+     * clears the port writes no port).
+     */
+    httpsPort?: number | null;
   };
   /**
    * Exact origins of an app on this computer that may show the Plannotator

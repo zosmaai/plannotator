@@ -24,8 +24,17 @@ function escapeHtml(value: string): string {
 }
 
 export interface LoginPageOptions {
-  /** The Inbox this page belongs to, shown under the form. */
-  host: string;
+  /**
+   * The Inbox this page belongs to, shown under the form: the name and the port this request arrived at,
+   * e.g. `inbox.example.com` or `inbox.example.com:4255`. It is the address in the person's own address
+   * bar, which is what the password works at.
+   */
+  address: string;
+  /**
+   * The address the passkeys belong to: the name over https, with no port, because that is where a
+   * passkey can be offered back whatever port this door happens to be published at.
+   */
+  passkeyAddress: string;
   /** Where to go after signing in: already through `safeNextPath`. */
   next: string;
   /** A line shown under the form on arrival (`?error=` in the URL, or a refused session). */
@@ -37,7 +46,8 @@ export interface LoginPageOptions {
  * another way through this door, and a person who is not signed in cannot reach the Inbox at all.
  */
 export interface PasskeyPageOptions {
-  host: string;
+  /** The address the passkeys belong to: the name over https, never a port. */
+  address: string;
   /** Where the page's own links go back to: already through `safeNextPath`. */
   next: string;
 }
@@ -62,7 +72,7 @@ export function loginPageHtml(options: LoginPageOptions): string {
     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4z"/><path d="M8.5 8.5h7"/><path d="M8.5 12h4.5"/></svg>
   </div>
   <h1>Sign in to your Inbox</h1>
-  <p class="auth-lede">This Inbox lives on <strong>${escapeHtml(options.host)}</strong>. Use the address it knows you by.</p>
+  <p class="auth-lede">This Inbox lives on <strong>${escapeHtml(options.address)}</strong>. Use the address it knows you by.</p>
   <form id="auth-form" method="post" action="/login" novalidate>
     <input type="hidden" name="next" value="${escapeHtml(options.next)}">
     <label for="email">E-mail</label>
@@ -74,7 +84,7 @@ export function loginPageHtml(options: LoginPageOptions): string {
   </form>
   <div class="auth-or"><span>or</span></div>
   <button type="button" id="auth-passkey" class="auth-alt">${PASSKEY_ICON}Sign in with a passkey</button>
-  <p class="auth-foot" id="auth-passkey-note">Passkeys need <strong>https://${escapeHtml(options.host)}</strong>. The password works everywhere.</p>
+  <p class="auth-foot" id="auth-passkey-note">Passkeys need <strong>${escapeHtml(options.passkeyAddress)}</strong>. The password works everywhere.</p>
   <p class="auth-error" id="auth-passkey-error" role="alert" hidden></p>
   <p class="auth-foot">Nobody else can open this Inbox. Your session lasts seven days, then asks again.</p>
   <noscript><p class="auth-error">This page needs JavaScript to sign in.</p></noscript>
@@ -102,7 +112,7 @@ export function passkeyPageHtml(options: PasskeyPageOptions): string {
     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="4"/><path d="M12 12l7 7"/><path d="M16 16l2-2"/></svg>
   </div>
   <h1>Passkeys for this Inbox</h1>
-  <p class="auth-lede">A passkey signs you in to <strong>${escapeHtml(options.host)}</strong> with your fingerprint, your face or a security key, instead of your password.</p>
+  <p class="auth-lede">A passkey signs you in to <strong>${escapeHtml(options.address)}</strong> with your fingerprint, your face or a security key, instead of your password.</p>
   <ul class="auth-list" id="passkey-list" aria-live="polite"></ul>
   <p class="auth-empty" id="passkey-empty" hidden>No passkeys yet. Add one from this device, then sign in with it next time.</p>
   <p class="auth-error" id="passkey-error" role="alert" hidden></p>

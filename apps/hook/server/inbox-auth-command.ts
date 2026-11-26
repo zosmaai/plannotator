@@ -1,6 +1,7 @@
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
 import { readInboxRegistry, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import {
+  authDoorUrl,
   isAllowedAuthEmail,
   normalizeAuthEmail,
   parseAuthAllowList,
@@ -17,6 +18,7 @@ export const INBOX_AUTH_USAGE = [
   "  plannotator inbox auth list [--json]",
   "  plannotator inbox auth remove <email> [--yes]",
   "  plannotator inbox auth on --host <name> [--allow <email[,email]>] [--port <n>]",
+  "                             [--https-port <n> | --public-port <n>]",
   "  plannotator inbox auth off",
   "  plannotator inbox auth status [--json]",
   "",
@@ -29,6 +31,9 @@ export const INBOX_AUTH_USAGE = [
   "           Only addresses on --allow may enter, so add it there too.",
   "on         opens the sign-in door at https://<host>. Point a tunnel or proxy at",
   "           127.0.0.1:<port> (printed, and 19501 unless --port says otherwise).",
+  "           --https-port is for a proxy that ends TLS somewhere other than 443",
+  "           (`tailscale serve --https=4255`): the door then answers",
+  "           <host>:<n> as well, and passkeys are minted for https://<host>:<n>.",
   "off        closes it. Accounts and their sessions are kept for the next time.",
   "status     what is set up, and whether the door is open right now.",
 ].join("\n");
@@ -138,7 +143,8 @@ export async function runInboxAuthCommand(args: readonly string[], deps: InboxAu
   const ask = deps.ask ?? ((question: string, hidden: boolean) => (hidden ? promptHidden(question) : promptVisible(question)));
   const stored = storedInboxAuth(loadConfig());
   const resolved = resolveInboxAuth(loadConfig(), deps.env ?? process.env);
-  const configBaseUrl = stored?.host ? `https://${stored.host}` : "http://127.0.0.1";
+  // The address with the port when there is one: the accounts and their passkeys belong to that address.
+  const configBaseUrl = authDoorUrl(stored) ?? "http://127.0.0.1";
   const allow = parseAuthAllowList(stored?.allow);
 
   const [command, ...rest] = args;
@@ -219,19 +225,21 @@ export async function runInboxAuthCommand(args: readonly string[], deps: InboxAu
     return result.removed ? 0 : 1;
   }
 
-  const saveAuth = (value: { on?: boolean; host?: string; allow?: string[]; port?: number }): boolean =>
+  const saveAuth = (value: { on?: boolean; host?: string; allow?: string[]; port?: number; httpsPort?: number | null }): boolean =>
     saveConfig({ inboxAuth: { ...stored, ...value } });
 
   if (command === "on") {
     const host = (flag(rest, "--host") ?? "").trim().toLowerCase().replace(/\.$/, "");
     const allowFlag = flag(rest, "--allow");
     const portFlag = flag(rest, "--port");
+    const httpsPortFlag = flag(rest, "--https-port") ?? flag(rest, "--public-port");
     const next = {
       ...(stored ?? {}),
       on: true,
       ...(host ? { host } : {}),
       ...(allowFlag ? { allow: parseAuthAllowList(allowFlag) } : {}),
       ...(portFlag ? { port: Number.parseInt(portFlag, 10) } : {}),
+      ...(httpsPortFlag ? { httpsPort: Number.parseInt(httpsPortFlag, 10) } : {}),
     };
     if (!next.host) {
       err("auth on needs the public name people sign in at: --host inbox.example.com");
@@ -246,14 +254,16 @@ export async function runInboxAuthCommand(args: readonly string[], deps: InboxAu
       err(parsed.error);
       return 1;
     }
-    if (!saveAuth({ on: true, host: next.host, allow: next.allow, port: next.port ?? parsed.port })) {
+    // `parsed.httpsPort` is null when TLS ends at 443: leave the field out rather than write a null into
+    // config.json, so a run without `--https-port` keeps whatever was already there.
+    if (!saveAuth({ on: true, host: next.host, allow: next.allow, port: next.port ?? parsed.port, ...(parsed.httpsPort ? { httpsPort: parsed.httpsPort } : {}) })) {
       err("Could not write config.json. Nothing was changed.");
       return 1;
     }
     const entry = readInboxRegistry(deps.dataDir);
     const door = await tellInbox(entry ?? (await deps.ensureRunning().catch(() => null)));
-    out(door ? `Sign-in: ${describe(door)}` : `Saved. The door opens at the next start: https://${next.host}/ (listener 127.0.0.1:${parsed.port})`);
-    const accounts = await withAccounts(deps.dataDir, `https://${next.host}`, next.allow, (instance) => instance.list());
+    out(door ? `Sign-in: ${describe(door)}` : `Saved. The door opens at the next start: ${parsed.baseUrl}/ (listener 127.0.0.1:${parsed.port})`);
+    const accounts = await withAccounts(deps.dataDir, parsed.baseUrl, next.allow, (instance) => instance.list());
     if (accounts.length === 0) out("No accounts yet: `plannotator inbox auth add <email>` makes the first one.");
     return 0;
   }
@@ -274,7 +284,10 @@ export async function runInboxAuthCommand(args: readonly string[], deps: InboxAu
 
   if (command === "status") {
     const record = readInboxRegistry(deps.dataDir)?.inbox_auth ?? null;
-    const where = stored?.host ? `https://${stored.host}/` : null;
+    // The same function the door and the card use, so a door published at `https://<host>:4255` says so
+    // here too — a hand-built `https://<host>/` would point at an address that answers `INVALID_ORIGIN`.
+    const address = authDoorUrl(stored);
+    const where = address ? `${address}/` : null;
     // Where the people who can sign in manage their passkeys: nothing else in the product links there.
     const passkeys = where ? `${where.replace(/\/$/, "")}${PASSKEY_PAGE_PATH}` : null;
     if (deps.json) {

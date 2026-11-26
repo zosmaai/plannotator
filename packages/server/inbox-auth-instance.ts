@@ -19,7 +19,7 @@ import { betterAuth } from "better-auth";
 import { getMigrations } from "better-auth/db/migration";
 import { hashPassword } from "better-auth/crypto";
 import { passkey } from "@better-auth/passkey";
-import { AUTH_COOKIE_PREFIX, INBOX_AUTH_SECRET_ENV, isAllowedAuthEmail, normalizeAuthEmail } from "@plannotator/shared/inbox/auth-door";
+import { AUTH_COOKIE_PREFIX, INBOX_AUTH_SECRET_ENV, doorOrigins, isAllowedAuthEmail, normalizeAuthEmail } from "@plannotator/shared/inbox/auth-door";
 
 /** Seven days, the page's own promise. */
 export const AUTH_SESSION_SECONDS = 7 * 24 * 60 * 60;
@@ -47,9 +47,16 @@ export interface InboxAuthInstanceOptions {
   /** For tests and the door's own note: how many sign-in attempts an hour, per address. */
   databaseFile?: string;
   /**
-   * What the browser is asked to sign for: the site a passkey is minted for. Both default to
-   * `baseUrl`, which is what they must be for a door reached at its own name; a proxy that ends TLS
-   * somewhere else is the only reason to say otherwise.
+   * The name this door answers (`inboxAuth.host`). It is what decides which `Origin` a sign-in may come
+   * from: the name at whatever port the request's own `Host` header arrived at, which is how a door
+   * published at an arbitrary port signs people in with nothing written down. Defaults to the host in
+   * `baseUrl`.
+   */
+  host?: string;
+  /**
+   * What the browser is asked to sign for: the site a passkey is minted for. Both default to the bare
+   * *name* — never a port: a passkey belongs to `https://<host>` whatever port the door is published at,
+   * and the browser refuses it anywhere else.
    */
   webauthn?: { rpID?: string; origin?: string };
 }
@@ -92,6 +99,18 @@ export interface InboxAuthInstance {
   close: () => void;
 }
 
+/**
+ * The `Host` header off whatever better-auth handed a function `trustedOrigins` — a `Request` per
+ * request, nothing at all while the instance is being built. Anything else is treated as no host.
+ */
+function hostHeaderOf(source: unknown): string | null {
+  if (typeof source !== "object" || source === null || !("headers" in source)) return null;
+  const headers = (source as { headers: unknown }).headers;
+  if (typeof headers !== "object" || headers === null || !("get" in headers)) return null;
+  const value = (headers as { get: (name: string) => unknown }).get("host");
+  return typeof value === "string" ? value : null;
+}
+
 function readSecret(dataDir: string): string {
   const file = join(dataDir, SECRET_FILE);
   if (existsSync(file)) {
@@ -113,9 +132,21 @@ export async function openInboxAuth(options: InboxAuthInstanceOptions): Promise<
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
   const secret = options.secret ?? (process.env[INBOX_AUTH_SECRET_ENV]?.trim() || readSecret(options.dataDir));
 
-  const rpID = options.webauthn?.rpID ?? new URL(options.baseUrl).hostname;
-  const passkeyOrigin = options.webauthn?.origin ?? options.baseUrl;
-  const trustedOrigins = passkeyOrigin === options.baseUrl ? [options.baseUrl] : [options.baseUrl, passkeyOrigin];
+  const doorHost = options.host?.trim().toLowerCase().replace(/\.$/, "") || new URL(options.baseUrl).hostname;
+  const rpID = options.webauthn?.rpID || doorHost;
+  // A passkey belongs to the name, not to a port: minting one for `https://<host>:4255` would strand it
+  // the moment the publisher picked another port, and a key minted for the bare host can never be
+  // offered at a ported one. The strictness is the point, so the door keeps `origin` explicit.
+  const passkeyOrigin = options.webauthn?.origin ?? `https://${doorHost}`;
+
+  /**
+   * Which `Origin` a sign-in may come from: the address the request arrived at (`https://<host>`, plus
+   * `https://<host>:<port>` when its `Host` header carried one). Same-origin and nothing else — the door
+   * refuses a `Host` that is not this name before better-auth sees it, so the port can only ever be a
+   * port after the door's own name. better-auth calls a function `trustedOrigins` per request, which is
+   * what makes a door behind a proxy on an arbitrary port work with no setting at all.
+   */
+  const trustedOrigins = (source: unknown): string[] => doorOrigins(hostHeaderOf(source), { host: doorHost });
 
   const auth = betterAuth({
     database: db,
