@@ -33,6 +33,7 @@ import {
   AUTH_LOGIN_PATH,
   doorAnswersHost,
   doorOffersPasskeys,
+  doorOrigins,
   markFromAuthDoor,
   PASSKEY_API_PATH,
   PASSKEY_JS_PATH,
@@ -205,6 +206,35 @@ export function createInboxAuthDoor(context: InboxAuthDoorContext) {
     if (path === "/auth.js") return textResponse(AUTH_JS, 200, "text/javascript; charset=utf-8");
     if (path === PASSKEY_JS_PATH) return textResponse(PASSKEY_JS, 200, "text/javascript; charset=utf-8");
     if (path === AUTH_BASE_PATH || path.startsWith(`${AUTH_BASE_PATH}/`)) {
+      // Whether a sign-in comes from this door's own page is the door's question, not better-auth's. Its
+      // `trustedOrigins` names the same addresses but it only consults them for some requests — a sign-in
+      // POST that carries no cookie skips the check — so relying on it makes the property depend on which
+      // paths better-auth decides to validate, and on the environment it runs in. Asked here, the answer
+      // is the same one on every path and wherever the door runs.
+      //
+      // An absent `Origin` is still allowed: a CLI, the window on loopback and every other program that was
+      // never on a page sends none, and a program cannot aim somebody else's page at us. A page always
+      // sends one, and a browser says `cross-site` when it is another site's, so a request that came from
+      // a page has to name an address this door answers at — the one it arrived at, or that name at the
+      // port https implies (`doorOrigins`), which is exactly what the door's own form sends.
+      const origin = req.headers.get("origin");
+      if (origin) {
+        let named: string | null = null;
+        try {
+          named = new URL(origin).origin;
+        } catch {
+          named = null;
+        }
+        if (!named || !doorOrigins(req.headers.get("host"), active).includes(named)) {
+          return jsonError(403, "forbidden_origin", "That sign-in did not come from this Inbox's own page.");
+        }
+      }
+      // The browser computes this from the page that sent the request and no script can set it, so it is
+      // worth the check even though an absent `Origin` is allowed above: the door's own page never says
+      // `cross-site`.
+      if (req.headers.get("sec-fetch-site")?.trim().toLowerCase() === "cross-site") {
+        return jsonError(403, "forbidden_origin", "That sign-in did not come from this Inbox's own page.");
+      }
       // A passkey ceremony needs a page the browser considers secure, and it can only run at the address
       // the key belongs to: `passkeyOrigin`, the bare name. Started anywhere else it would fail WebAuthn's
       // own origin check, so the door refuses it here and lets its own line say what to use instead.

@@ -226,18 +226,22 @@ describe("the sign-in door", () => {
     // at the port the request arrived at, or this name at the port https implies.
     const { base } = await startWithAccounts();
     await seed(ME);
+    // The code comes back with the status because both refusals are 403s: better-auth answers
+    // `INVALID_ORIGIN` when it validates at all, and the door answers `forbidden_origin`. Asking for the
+    // door's code is what proves the door itself refused, and it fails if its own check is ever removed.
     const at = async (origin: string) => {
       const answer = await fetch(`${base}/api/auth/sign-in/email`, {
         method: "POST",
         headers: { Host: `${HOST}:4255`, "content-type": "application/json", origin, "x-forwarded-for": nextClient() },
         body: JSON.stringify({ email: ME, password: PASSWORD }),
       });
-      return answer.status;
+      const body = (await answer.clone().json().catch(() => null)) as { code?: unknown } | null;
+      return { status: answer.status, code: typeof body?.code === "string" ? body.code : null };
     };
-    expect(await at("https://evil.example.com")).toBe(403); // another site aimed at this port
-    expect(await at(`http://${HOST}:4255`)).toBe(403); // this name over http is a different origin
-    expect(await at(`https://${HOST}:8443`)).toBe(403); // a port nobody is standing on
-    expect(await at(`https://${HOST}`)).toBe(200); // this name at the port https implies, always its own
+    expect(await at("https://evil.example.com")).toEqual({ status: 403, code: "forbidden_origin" }); // another site aimed at this port
+    expect(await at(`http://${HOST}:4255`)).toEqual({ status: 403, code: "forbidden_origin" }); // this name over http is a different origin
+    expect(await at(`https://${HOST}:8443`)).toEqual({ status: 403, code: "forbidden_origin" }); // a port nobody is standing on
+    expect(await at(`https://${HOST}`)).toEqual({ status: 200, code: null }); // this name at the port https implies, always its own
   }, 30_000);
 
   test("answers a port nobody named because the name matched — and that is all the name gives", async () => {
