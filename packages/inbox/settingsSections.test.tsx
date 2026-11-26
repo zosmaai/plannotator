@@ -832,7 +832,10 @@ test.skipIf(!hasDom)('phones off (the released default): Devices is Over your ta
   expect(el.querySelector('[data-settings-phones]')).toBeNull();
   expect(el.querySelector('[data-pair-flow]')).toBeNull();
   expect(buttonText(el, 'Pair a phone')).toBeNull();
-  expect([...el.querySelectorAll('.ib-spg .ib-sgroup')].map((g) => (g.hasAttribute('data-settings-tailscale') ? 'tailnet' : g.hasAttribute('data-settings-cloudflare') ? 'cloudflare' : g.hasAttribute('data-settings-cloud') ? 'cloud' : 'other'))).toEqual(['tailnet', 'cloudflare']);
+  // Our fork carries the "Sign in with an account" card (WithAnAccount) at the
+  // foot of the Devices page, so a section of this page is not tailnet or
+  // cloudflare: the exact list names it too, last, where the page renders it.
+  expect([...el.querySelectorAll('.ib-spg .ib-sgroup')].map((g) => (g.hasAttribute('data-settings-tailscale') ? 'tailnet' : g.hasAttribute('data-settings-cloudflare') ? 'cloudflare' : g.hasAttribute('data-settings-cloud') ? 'cloud' : g.hasAttribute('data-settings-signin') ? 'signin' : 'other'))).toEqual(['tailnet', 'cloudflare', 'signin']);
 });
 
 test.skipIf(!hasDom)('on a phone: #settings is the list of sections; a section opens with ‹ Settings, which goes back to the list', async () => {
