@@ -14,8 +14,8 @@
  * - 'totman': the Face icon. The id is older than the name: it is what people
  *   picked when this icon was the default, so it keeps meaning this icon.
  * 'classic' (the P icon, offered in 0.28.57) is no longer a style: a stored
- * 'classic' reads as nothing stored, so it shows the default, and nothing
- * rewrites the file or the cookie that holds it.
+ * 'classic' reads as the default (faviconStyleOf), so it shows Zosma, and
+ * nothing rewrites the file or the cookie that holds it.
  */
 export type FaviconStyle = 'zosma' | 'glass' | 'yellow' | 'totman';
 
@@ -31,4 +31,16 @@ export const FAVICON_STYLE_CHOICES: readonly { id: FaviconStyle; label: string }
 
 export function isFaviconStyle(value: unknown): value is FaviconStyle {
   return value === 'zosma' || value === 'glass' || value === 'yellow' || value === 'totman';
+}
+
+/**
+ * What a stored value stands for: a live id as itself, 'classic' (0.28.57's P)
+ * as the default, and anything else as nothing stored, which the settings store
+ * then fills with the default. Read this rather than isFaviconStyle alone, so a
+ * retired id keeps its meaning instead of being mistaken for an empty slot that
+ * has to be written over.
+ */
+export function faviconStyleOf(value: unknown): FaviconStyle | undefined {
+  if (value === 'classic') return DEFAULT_FAVICON_STYLE;
+  return isFaviconStyle(value) ? value : undefined;
 }

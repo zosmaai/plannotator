@@ -4232,7 +4232,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     display_name: displayNameState(),
     /** The window's text size in px (config.json `inboxTextSize`), 14 unless chosen. */
     text_size: textSizeState(),
-    /** The favicon (config.json `favicon`), shared with plan review, code review and annotate: glass unless chosen. */
+    /** The favicon (config.json `favicon`), shared with plan review, code review and annotate: Zosma unless chosen. */
     favicon: faviconState(),
     /** The reaction tray's saved emoji (config.json `inboxReactions`): up to 5, in the order saved; [] until one is saved. `reactions_rev` counts the saves. */
     ...reactionsWire(reactionsState()),

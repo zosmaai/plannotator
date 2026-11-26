@@ -19,7 +19,7 @@ import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
 import { INBOX_AGENT_FIELD_DESCRIPTIONS, INBOX_REF_LINK_RULE, inboxAgentTool, parseInboxToolList } from "@plannotator/shared/inbox/connection";
 import { INBOX_DEFAULT_SERVED_TOOLS, INBOX_MCP_INSTRUCTIONS, INBOX_SERVED_TOOLS, INBOX_STOP_EXAMPLE, SEND_BODY_DESCRIPTION } from "./inbox-mcp";
 import { INBOX_FORBIDDEN_PORT, startInboxServer, type InboxServer } from "./inbox";
-import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, YELLOW_FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
+import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, YELLOW_FAVICON_PNG_BYTES, ZOSMA_FAVICON_ICO_BYTES, ZOSMA_FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -914,7 +914,7 @@ describe("the window's routes: settings, restart, favicon", () => {
     }
   });
 
-  test("the favicon saves into config.json `favicon`, glass unless chosen, and /favicon.png answers with it", async () => {
+  test("the favicon saves into config.json `favicon`, Zosma unless chosen, and /favicon.png answers with it", async () => {
     const root = tempRoot();
     const dataDir = join(root, "data");
     const previous = process.env.PLANNOTATOR_DATA_DIR;
@@ -926,8 +926,8 @@ describe("the window's routes: settings, restart, favicon", () => {
       const read = async () => (await (await fetch(`${base}/api/inbox/settings`)).json()).favicon;
       const onDisk = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { favicon?: unknown; theme?: unknown };
       const icon = async () => new Uint8Array(await (await fetch(`${base}/favicon.png`)).arrayBuffer());
-      expect(await read()).toBe("glass");
-      expect(await icon()).toEqual(FAVICON_PNG_BYTES);
+      expect(await read()).toBe("zosma");
+      expect(await icon()).toEqual(ZOSMA_FAVICON_PNG_BYTES);
       // "classic" was the P icon until it was removed after 0.28.57: no longer a choice.
       for (const bad of ["face", "Glass", "classic", "", null, 1, { style: "glass" }]) {
         const refused = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, favicon: bad });
@@ -961,10 +961,10 @@ describe("the window's routes: settings, restart, favicon", () => {
       expect(face.src).toBe("/app-icon/face-256.png");
       const touch = new Uint8Array(await (await fetch(`${base}/apple-touch-icon.png`)).arrayBuffer());
       expect(touch).toEqual(new Uint8Array(await (await fetch(`${base}${face.src}`)).arrayBuffer()));
-      // A config.json that still says "classic" (0.28.57's P): read as unset, Glass, and the file is left as it is.
+      // A config.json that still says "classic" (0.28.57's P): read as unset, Zosma, and the file is left as it is.
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ ...onDisk(), favicon: "classic" }));
-      expect(await read()).toBe("glass");
-      expect(await icon()).toEqual(FAVICON_PNG_BYTES);
+      expect(await read()).toBe("zosma");
+      expect(await icon()).toEqual(ZOSMA_FAVICON_PNG_BYTES);
       expect(onDisk().favicon).toBe("classic");
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
@@ -1469,11 +1469,11 @@ describe("the window's routes: settings, restart, favicon", () => {
       const icon = await fetch(`http://127.0.0.1:${server.port}/favicon.png`);
       expect(icon.status).toBe(200);
       expect(icon.headers.get("content-type")).toMatch(/^image\//);
-      // The window links /favicon.ico: Glass's .ico, so the tab shows the hand-pixelled 16 or 32.
+      // The window links /favicon.ico: Zosma's .ico, so the tab shows the mark at 16 or 32.
       const ico = await fetch(`http://127.0.0.1:${server.port}/favicon.ico`);
       expect(ico.status).toBe(200);
       expect(ico.headers.get("content-type")).toBe("image/x-icon");
-      expect(new Uint8Array(await ico.arrayBuffer())).toEqual(FAVICON_ICO_BYTES);
+      expect(new Uint8Array(await ico.arrayBuffer())).toEqual(ZOSMA_FAVICON_ICO_BYTES);
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;

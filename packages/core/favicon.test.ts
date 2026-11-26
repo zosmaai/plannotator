@@ -25,6 +25,7 @@ import {
   faviconIcoBody,
   faviconLinkType,
   faviconPngDataUrl,
+  faviconStyleOf,
   isFaviconStyle,
 } from "./favicon";
 
@@ -188,5 +189,17 @@ describe("favicon style switcher", () => {
     expect(isFaviconStyle(undefined)).toBe(false);
     expect(isFaviconStyle(123)).toBe(false);
     expect(isFaviconStyle({})).toBe(false);
+  });
+
+  test("faviconStyleOf keeps a retired 'classic' meaning the default, and only that", () => {
+    // Not "nothing stored": the settings store fills an empty slot with the default
+    // and writes it back, and a 'classic' left by 0.28.57 should stay where it is.
+    expect(faviconStyleOf("classic")).toBe(DEFAULT_FAVICON_STYLE);
+    for (const style of ["zosma", "glass", "yellow", "totman"]) {
+      expect(faviconStyleOf(style)).toBe(style);
+    }
+    for (const nothing of ["", "unknown", null, undefined, 123, {}]) {
+      expect(faviconStyleOf(nothing)).toBeUndefined();
+    }
   });
 });

@@ -10,7 +10,7 @@ import {
   writeServerReadyMetadata,
 } from "./shared-handlers";
 import { saveConfig } from "./config";
-import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, YELLOW_FAVICON_ICO_BYTES, YELLOW_FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
+import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, YELLOW_FAVICON_ICO_BYTES, YELLOW_FAVICON_PNG_BYTES, ZOSMA_FAVICON_ICO_BYTES, ZOSMA_FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
 
 function saveNotesRequest(body: unknown): Request {
   return new Request("http://localhost/api/save-notes", {
@@ -425,11 +425,11 @@ describe("handleFavicon", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  test("serves the Glass PNG when no style is persisted", async () => {
+  test("serves the Zosma PNG when no style is persisted", async () => {
     const response = handleFavicon();
     expect(response.headers.get("content-type")).toBe("image/png");
     const bytes = new Uint8Array(await response.arrayBuffer());
-    expect(bytes).toEqual(FAVICON_PNG_BYTES);
+    expect(bytes).toEqual(ZOSMA_FAVICON_PNG_BYTES);
   });
 
   test("serves each persisted style's own PNG: glass, yellow, totman (Face); classic (the removed P) the default", async () => {
@@ -437,7 +437,7 @@ describe("handleFavicon", () => {
       ["glass", FAVICON_PNG_BYTES],
       ["yellow", YELLOW_FAVICON_PNG_BYTES],
       ["totman", FACE_FAVICON_PNG_BYTES],
-      ["classic", FAVICON_PNG_BYTES],
+      ["classic", ZOSMA_FAVICON_PNG_BYTES],
     ] as const) {
       saveConfig({ favicon: style as never });
       const response = handleFavicon();
@@ -447,16 +447,16 @@ describe("handleFavicon", () => {
     }
   });
 
-  test("/favicon.ico, what every page links: Glass's and Yellow's multi-size .ico, Face its PNG", async () => {
-    const glass = handleFavicon("/favicon.ico");
-    expect(glass.headers.get("content-type")).toBe("image/x-icon");
-    expect(glass.headers.get("cache-control")).toBe("no-cache");
-    expect(new Uint8Array(await glass.arrayBuffer())).toEqual(FAVICON_ICO_BYTES);
+  test("/favicon.ico, what every page links: Zosma's, Glass's and Yellow's multi-size .ico, Face its PNG", async () => {
+    const zosma = handleFavicon("/favicon.ico");
+    expect(zosma.headers.get("content-type")).toBe("image/x-icon");
+    expect(zosma.headers.get("cache-control")).toBe("no-cache");
+    expect(new Uint8Array(await zosma.arrayBuffer())).toEqual(ZOSMA_FAVICON_ICO_BYTES);
     for (const [style, expected] of [
       ["glass", FAVICON_ICO_BYTES],
       ["yellow", YELLOW_FAVICON_ICO_BYTES],
       ["totman", FACE_FAVICON_PNG_BYTES],
-      ["classic", FAVICON_ICO_BYTES],
+      ["classic", ZOSMA_FAVICON_ICO_BYTES],
     ] as const) {
       saveConfig({ favicon: style as never });
       const response = handleFavicon("/favicon.ico");

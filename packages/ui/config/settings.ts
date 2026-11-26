@@ -14,7 +14,7 @@ import {
   type AnnotateAgentTerminalSide,
 } from '@plannotator/core/agent-terminal';
 import type { DiffLineBgIntensity, ReviewDefaults } from '@plannotator/core/config-types';
-import { DEFAULT_FAVICON_STYLE, isFaviconStyle, type FaviconStyle } from '@plannotator/core/favicon-style';
+import { DEFAULT_FAVICON_STYLE, faviconStyleOf, type FaviconStyle } from '@plannotator/core/favicon-style';
 import {
   agentSwitchConfigValue,
   isAgentSwitchName,
@@ -229,13 +229,14 @@ export const SETTINGS = {
     defaultValue: DEFAULT_FAVICON_STYLE as FaviconStyle,
     fromCookie: () => {
       const v = storage.getItem('plannotator-favicon');
-      return isFaviconStyle(v) ? v : undefined;
+      // faviconStyleOf, not isFaviconStyle: a 'classic' left by 0.28.57 is the
+      // default, not an empty slot, so loading writes no cookie over it.
+      return faviconStyleOf(v);
     },
     toCookie: (v: FaviconStyle) => storage.setItem('plannotator-favicon', v),
     serverKey: 'favicon',
     fromServer: (sc: Record<string, unknown>) => {
-      const v = sc.favicon;
-      return isFaviconStyle(v) ? v : undefined;
+      return faviconStyleOf(sc.favicon);
     },
     toServer: (v: FaviconStyle) => ({ favicon: v }),
   },

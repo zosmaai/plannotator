@@ -6,7 +6,7 @@
 
 import type { FaviconStyle } from './favicon-style';
 
-export { DEFAULT_FAVICON_STYLE, FAVICON_STYLE_CHOICES, isFaviconStyle, type FaviconStyle } from './favicon-style';
+export { DEFAULT_FAVICON_STYLE, FAVICON_STYLE_CHOICES, faviconStyleOf, isFaviconStyle, type FaviconStyle } from './favicon-style';
 
 /**
  * The Glass favicon, the default, as the tab shows it: the brand studio's
