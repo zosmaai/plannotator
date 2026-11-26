@@ -212,6 +212,35 @@ describe("the sign-in door", () => {
     expect(body).toContain(`Passkeys need <strong>https://${HOST}</strong>. The password works everywhere.`);
   }, 30_000);
 
+  test("the line says who signed in, and only this door's session decides that", async () => {
+    // Location alone cannot tell two people on one allowlist apart, and the place says `tailnet` for both: the
+    // account is the only thing that names who wrote it. It is read from the session this door verified and from
+    // nothing the request said — the body's own `sent_from` is not a thing a caller can set anywhere.
+    const { base, inbox } = await startWithAccounts();
+    await seed(ME);
+    const signed = await signIn(base, ME);
+    expect(signed.cookie).toContain("session_token");
+
+    const project = inbox.store.ensureProject({ name: "shop", root: join(dataDir, "shop") });
+    const asked = inbox.store.sendMessage({
+      project_id: project.id,
+      author: { kind: "agent", host: "claude-code", session: "ses-door", name: "Claude Code" },
+      body: "The preview is up.",
+      idempotency_key: "door-ask",
+    }).message;
+
+    const answer = await request(`${base}/api/inbox/messages/${asked.id}/reply`, {
+      method: "POST",
+      headers: { cookie: signed.cookie!, "content-type": "application/json", "sec-fetch-dest": "empty" },
+      body: JSON.stringify({ idempotency_key: "door-reply", words: "Send me the link.", questions: [] }),
+      redirect: "manual",
+    });
+    expect(answer.status).toBe(200);
+    const stored = inbox.store.message(((await answer.json()) as { reply: { id: string } }).reply.id)!;
+    // The account the door signed in, name and all (better-auth gives the local part when no name was set).
+    expect(stored.sent_from).toEqual({ kind: "tailnet", account: { email: ME, name: "me" } });
+  }, 30_000);
+
   test("a session's cookies stop at the door", () => {
     // better-auth names it __Secure-plannotator.session_token on HTTPS.
     expect(withoutAuthCookies("__Secure-plannotator.session_token=abc; __Secure-plannotator.session_data=def; theme=dark")).toBe("theme=dark");

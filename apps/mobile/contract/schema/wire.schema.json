@@ -4860,6 +4860,9 @@
               "properties": {
                 "kind": {
                   "$ref": "#/$defs/InboxSentFromPlace"
+                },
+                "account": {
+                  "$ref": "#/$defs/InboxSessionAccount"
                 }
               },
               "required": [
@@ -7068,6 +7071,30 @@
       ],
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxSessionAccount": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "email",
+        "name"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-sent-from.ts"
     },
     "InboxSkillReaction": {
       "type": "object",

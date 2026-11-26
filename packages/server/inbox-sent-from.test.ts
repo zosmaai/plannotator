@@ -51,10 +51,23 @@ describe("what the server can vouch for, from the request alone", () => {
     { name: "another device over the tailnet, with the window's marks: still the tailnet", facts: { ...LOCAL, via: "tailnet", window: true }, from: { kind: "tailnet" } },
     { name: "the Cloudflare door, with the window's marks: still Cloudflare", facts: { ...LOCAL, via: "tailnet", cloudflare: true, window: true }, from: { kind: "cloudflare" } },
     { name: "a linked computer's forward is never here", facts: { ...door(MACHINE_PLATFORM, "Ada's MacBook"), window: true }, from: { kind: "machine", name: "Ada's MacBook" } },
+    { name: "the account the sign-in door checked joins a place this Inbox accepted", facts: { ...LOCAL, via: "tailnet", account: { email: "ada@example.com", name: "Ada Lovelace" } }, from: { kind: "tailnet", account: { email: "ada@example.com", name: "Ada Lovelace" } } },
+    { name: "and the Cloudflare door's too", facts: { ...LOCAL, via: "tailnet", cloudflare: true, account: { email: "ada@example.com", name: null } }, from: { kind: "cloudflare", account: { email: "ada@example.com", name: null } } },
+    { name: "this computer's own window is not signed in: a handed account records nothing", facts: { ...LOCAL, window: true, account: { email: "ada@example.com", name: "Ada Lovelace" } }, from: { kind: "here" } },
+    { name: "a phone or a linked computer is never named by this Inbox's account", facts: { ...door(MACHINE_PLATFORM, "Ada's MacBook", "tailnet"), account: { email: "ada@example.com", name: "Ada Lovelace" } }, from: { kind: "machine", name: "Ada's MacBook", via: "tailnet" } },
+    { name: "an account that is not of the shape leaves the place exactly as it was", facts: { ...LOCAL, via: "tailnet", account: { email: "", name: "Ghost" } }, from: { kind: "tailnet" } },
   ];
   for (const { name, facts, from } of CASES) {
     test(name, () => expect(inboxRequestSentFrom(facts)).toEqual(from));
   }
+
+  test("no record gains an account it was not given, and none prints half an account", () => {
+    // `toEqual` waves away an explicit undefined, which is not good enough here: a stored record must not grow a key.
+    expect(inboxRequestSentFrom({ ...LOCAL, via: "tailnet" })).not.toHaveProperty("account");
+    for (const account of [null, undefined, { email: "ada\n@example.com", name: "Ada" }, 7, "ada@example.com"]) {
+      expect(inboxRequestSentFrom({ ...LOCAL, via: "tailnet", account: account as never })).toEqual({ kind: "tailnet" });
+    }
+  });
 
   test("a linked computer's name is recorded clean, as the line reads it; an empty one falls back to its device's name", () => {
     const named = (machineName: string | null, deviceName: string | null = null) => inboxRequestSentFrom({ ...LOCAL, door: { platform: MACHINE_PLATFORM, machineName, deviceName, place: null } });

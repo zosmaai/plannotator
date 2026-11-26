@@ -5,7 +5,13 @@
  * caller (a paired phone, or a linked computer with the place its own Inbox told the same way). See "Where the person
  * wrote it" in docs/agent-guides/inbox-messages.md.
  */
-import { isInboxSentFromPlace, type InboxSentFrom, type InboxSentFromPlace } from "@plannotator/core/inbox-types";
+import {
+  inboxSessionAccountOf,
+  isInboxSentFromPlace,
+  type InboxSentFrom,
+  type InboxSentFromPlace,
+  type InboxSessionAccount,
+} from "@plannotator/core/inbox-types";
 import { AGENT_PLATFORM, MACHINE_PLATFORM } from "./inbox-devices";
 import { inboxMachineRecordName } from "./inbox-sent-from-reader";
 
@@ -28,6 +34,12 @@ export interface InboxSentFromFacts {
    * the first is missing or nothing is left of it once cleaned.
    */
   door: { platform: string; machineName: string | null; deviceName?: string | null; place: InboxSentFromPlace | null } | null;
+  /**
+   * The account whose session the sign-in door checked (packages/shared/inbox/auth-door.ts, inbox-auth-door.ts): set for
+   * that door only. A paired phone names itself by its device, a linked computer by the name this Inbox holds for it, and
+   * another machine's accounts are not this Inbox's to vouch for. Absent or null: the line is named as it always was.
+   */
+  account?: InboxSessionAccount | null;
 }
 
 /**
@@ -46,8 +58,11 @@ export function inboxRequestSentFrom(facts: InboxSentFromFacts): InboxSentFrom |
     if (door.platform === AGENT_PLATFORM) return null;
     return { kind: "phone" };
   }
-  if (facts.cloudflare) return { kind: "cloudflare" };
-  if (facts.via === "tailnet" && !facts.ownNode) return { kind: "tailnet" };
+  // A web session the sign-in door let through: the account joins the record, read back rather than trusted, so a
+  // caller that hands something odd gets the line without a name instead of one that makes a person up.
+  const account = inboxSessionAccountOf(facts.account);
+  if (facts.cloudflare) return { kind: "cloudflare", ...(account ? { account } : {}) };
+  if (facts.via === "tailnet" && !facts.ownNode) return { kind: "tailnet", ...(account ? { account } : {}) };
   return facts.window ? { kind: "here" } : null;
 }
 

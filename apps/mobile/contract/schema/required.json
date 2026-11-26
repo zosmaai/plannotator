@@ -894,6 +894,10 @@
       "session",
       "wakes"
     ],
+    "InboxSessionAccount": [
+      "email",
+      "name"
+    ],
     "InboxSkillReaction": [
       "emoji",
       "skill"
