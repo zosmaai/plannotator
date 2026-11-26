@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { doorAnswersHost, doorOffersPasskeys, doorOrigins, passkeyOrigin, safeNextPath, withoutAuthCookies } from "@plannotator/shared/inbox/auth-door";
+import { doorAnswersHost, doorOffersPasskeys, doorOrigins, passkeyOrigin, passkeyOrigins, safeNextPath, withoutAuthCookies } from "@plannotator/shared/inbox/auth-door";
 import { openInboxAuth } from "./inbox-auth-instance";
 import { startInboxServer, type InboxServer } from "./inbox";
 
@@ -269,18 +269,41 @@ describe("the sign-in door", () => {
     expect(((await off.json()) as { code: string }).code).toBe("local_only");
   }, 30_000);
 
-  test("a pinned HTTPS port changes the address the door prints, not which ports it answers", async () => {
-    // The opt-in, kept for anyone who wants their address pinned to one port: it decides what the door
-    // *calls itself* — the registry URL, the card, the CLI line. It is not load-bearing for signing in,
-    // and it does not move a passkey.
+  test("a pinned HTTPS port is where the passkeys live, and the bare name keeps taking them", async () => {
+    // The owner's decision: make the keys follow the pinned port, so a passkey works at the address the
+    // person actually signs in at. It decides the address the door *calls itself* — the registry URL, the
+    // card, the CLI line, the line above the passkey button — and it opens the ceremony at that port as
+    // well as at the bare name, one key for both (`passkeyOrigins`). It still does not narrow the `Host`
+    // allowlist: every port of this name answers the pages, as before.
     const { base, inbox } = await startWithAccounts({ httpsPort: 4255 });
+    await seed(ME);
     expect(inbox.registry.inbox_auth?.url).toBe(`https://${HOST}:4255/`);
     for (const host of [HOST, `${HOST}:443`, `${HOST}:4255`, `${HOST}:9999`]) {
       expect((await fetch(`${base}/login`, { headers: { Host: host } })).status).toBe(200);
     }
+    // The page still speaks of where the person is standing, and points passkeys at the pinned port.
     const body = await (await fetch(`${base}/login`, { headers: { Host: `${HOST}:9999` } })).text();
     expect(body).toContain(`This Inbox lives on <strong>${HOST}:9999</strong>`);
-    expect(body).toContain(`Passkeys need <strong>https://${HOST}</strong>.`);
+    expect(body).toContain(`Passkeys need <strong>https://${HOST}:4255</strong>. The password works everywhere.`);
+
+    // And the door agrees with its own words: the page it renders for the keys is the pinned address, and
+    // `/passkeys` answers at that port instead of refusing the ceremony.
+    const signed = await fetch(`${base}/api/auth/sign-in/email`, {
+      method: "POST",
+      headers: { Host: `${HOST}:4255`, "content-type": "application/json", origin: `https://${HOST}:4255`, "x-forwarded-for": nextClient() },
+      body: JSON.stringify({ email: ME, password: PASSWORD }),
+    });
+    expect(signed.status).toBe(200);
+    const cookie = signed.headers.get("set-cookie")?.split(";")[0] ?? "";
+    const page = await fetch(`${base}/passkeys`, { headers: { Host: `${HOST}:4255`, cookie } });
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain(`A passkey signs you in to <strong>https://${HOST}:4255</strong>`);
+
+    // A port nobody pinned is refused the ceremony by the same rule as ever, and the line names the port
+    // a key would have to be made at.
+    const elsewhere = await fetch(`${base}/passkeys`, { headers: { Host: `${HOST}:8443`, cookie } });
+    expect(elsewhere.status).toBe(403);
+    expect(((await elsewhere.json()) as { code: string }).code).toBe("insecure_connection");
   }, 30_000);
 
   test("offers the passkey page when a proxy under-reports TLS, and still refuses a published port", async () => {
@@ -306,15 +329,14 @@ describe("the sign-in door", () => {
     expect(page.status).toBe(200);
     const management = await page.text();
     expect(management).toContain("A passkey signs you in to");
-    // …and it names the bare address, because that is where the key lives whatever port this door answers.
+    // …and it names the bare address, because with no port pinned that is where the key lives.
     expect(management).toContain(`A passkey signs you in to <strong>${passkeyOrigin({ host: HOST })}</strong>`);
 
     const listed = await fetch(`${base}/api/inbox/auth/passkeys`, { headers: { Host: HOST, cookie, ...insecure } });
     expect(listed.status).toBe(200);
 
-    // A port still refuses the ceremony, and now for the only reason that is real: a key belongs to the
-    // bare name, so a page at `:4255` could only ever fail WebAuthn's own origin check. The door says its
-    // line instead of running one.
+    // A port still refuses the ceremony — nothing is pinned here, so the keys live at the bare name only.
+    // The door says its line instead of running a ceremony the browser could only fail.
     const ceremony = await fetch(`${base}/api/auth/passkey/generate-register-options`, {
       method: "GET",
       headers: { Host: `${HOST}:4255`, origin: `https://${HOST}:4255`, ...insecure },
@@ -423,9 +445,17 @@ describe("the sign-in door", () => {
     expect(doorOrigins("evil.example.com:4255", { host: HOST })).toEqual([`https://${HOST}`]);
     expect(doorOrigins(null, { host: HOST })).toEqual([`https://${HOST}`]);
 
-    // Passkeys stay strict where strictness is real: WebAuthn compares the arrival against the exact
-    // origin a key was minted for, so the door's keys belong to the bare name and no port moves them.
+    // Passkeys follow the settings, and `rpID` is always the bare name: WebAuthn compares a credential
+    // against the exact origin it was made at, so a key lives at `https://<host>` normally and at
+    // `https://<host>:<httpsPort>` when the person pinned one — both addresses accept it, so a key made
+    // at either works at the other.
     expect(passkeyOrigin({ host: HOST })).toBe(`https://${HOST}`);
+    expect(passkeyOrigin({ host: HOST, httpsPort: null })).toBe(`https://${HOST}`);
+    expect(passkeyOrigin({ host: HOST, httpsPort: 4255 })).toBe(`https://${HOST}:4255`);
+    expect(passkeyOrigin({ host: "Inbox.Example.COM.", httpsPort: 4255 })).toBe(`https://${HOST}:4255`);
+    expect(passkeyOrigins({ host: HOST })).toEqual([`https://${HOST}`]);
+    expect(passkeyOrigins({ host: HOST, httpsPort: null })).toEqual([`https://${HOST}`]);
+    expect(passkeyOrigins({ host: HOST, httpsPort: 4255 })).toEqual([`https://${HOST}`, `https://${HOST}:4255`]);
     expect(doorOffersPasskeys(new Headers({ host: HOST }), { host: HOST })).toBe(true);
     expect(doorOffersPasskeys(new Headers({ host: `${HOST}:443` }), { host: HOST })).toBe(true);
     expect(doorOffersPasskeys(new Headers({ host: HOST, "x-forwarded-proto": "https" }), { host: HOST })).toBe(true);
@@ -436,8 +466,16 @@ describe("the sign-in door", () => {
     expect(doorOffersPasskeys(new Headers({ host: `${HOST}:443`, "x-forwarded-proto": "http, https" }), { host: HOST })).toBe(true);
     expect(doorOffersPasskeys(new Headers({ host: `${HOST}:4255`, "x-forwarded-proto": "https" }), { host: HOST })).toBe(false);
     expect(doorOffersPasskeys(new Headers({ host: `${HOST}:9999` }), { host: HOST })).toBe(false);
-    expect(doorOffersPasskeys(new Headers(), { host: HOST })).toBe(false);
     expect(doorOffersPasskeys(new Headers({ host: "evil.example.com", "x-forwarded-proto": "https" }), { host: HOST })).toBe(false);
+    // With a port pinned, that port joins the bare name and `:443` — and nothing else does. A key made at
+    // one pinned port does not work at another, which is what a pin means.
+    expect(doorOffersPasskeys(new Headers({ host: HOST }), { host: HOST, httpsPort: 4255 })).toBe(true);
+    expect(doorOffersPasskeys(new Headers({ host: `${HOST}:443` }), { host: HOST, httpsPort: 4255 })).toBe(true);
+    expect(doorOffersPasskeys(new Headers({ host: `${HOST}:4255` }), { host: HOST, httpsPort: 4255 })).toBe(true);
+    expect(doorOffersPasskeys(new Headers({ host: `${HOST}:8443` }), { host: HOST, httpsPort: 4255 })).toBe(false);
+    expect(doorOffersPasskeys(new Headers({ host: `${HOST}:8443`, "x-forwarded-proto": "https" }), { host: HOST, httpsPort: 4255 })).toBe(false);
+    expect(doorOffersPasskeys(new Headers({ host: "evil.example.net:4255" }), { host: HOST, httpsPort: 4255 })).toBe(false);
+    expect(doorOffersPasskeys(new Headers(), { host: HOST, httpsPort: 4255 })).toBe(false);
     // Loopback is a secure context in every browser, so http there may run one. The settings refuse a
     // loopback name today (`isPublicDnsName`), so this is pinned for whoever lifts that — it is the door's
     // own arrival when it does, not somebody else's header.
