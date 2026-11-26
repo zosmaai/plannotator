@@ -55,6 +55,39 @@ describe("plannotator inbox auth", () => {
     expect(out.join("\n")).toContain("No accounts yet");
   }, 30_000);
 
+  test("a door published at a port says that address, and 443 is not a port to write down", async () => {
+    expect(await run(["on", "--host", "inbox.example.com", "--allow", ME, "--https-port", "4255"])).toBe(0);
+    expect(config().inboxAuth).toMatchObject({ on: true, host: "inbox.example.com", httpsPort: 4255 });
+    // The saved line, `status`, and the passkeys line all say the address people actually type.
+    expect(out.join("\n")).toContain("https://inbox.example.com:4255/");
+    out = [];
+    expect(await run(["status"])).toBe(0);
+    expect(out.join("\n")).toContain("at https://inbox.example.com:4255/");
+    expect(out.join("\n")).toContain("Passkeys: https://inbox.example.com:4255/passkeys");
+
+    // `https://inbox.example.com` already means 443; writing it down would put a port into an address
+    // no browser ever sends, and passkeys minted for `:443` would never be offered at the bare name.
+    out = [];
+    err = [];
+    expect(await run(["on", "--host", "inbox.example.com", "--allow", ME, "--https-port", "443"])).toBe(1);
+    expect(err.join("\n")).toContain("443");
+  }, 30_000);
+
+  test("--public-port: a proxy of your own tells the door the port people reach it at", async () => {
+    // `tailscale serve` reports the port it published, so it never needs this. Caddy, nginx, cloudflared
+    // or an ssh -L in front of the door cannot: the door listens on its own port, and a passkey minted for
+    // that one is never asked for by a browser at the public address.
+    expect(await run(["on", "--host", "door.example.com", "--allow", ME, "--port", "47310", "--public-port", "8443"])).toBe(0);
+    expect(config().inboxAuth).toMatchObject({ on: true, host: "door.example.com", port: 47310, httpsPort: 8443 });
+    // What it saves, what it prints, and what it does not: the port the door listens on is not an address.
+    expect(out.join("\n")).toContain("https://door.example.com:8443/");
+    expect(out.join("\n")).toContain("listener 127.0.0.1:47310");
+    out = [];
+    expect(await run(["status"])).toBe(0);
+    expect(out.join("\n")).toContain("at https://door.example.com:8443/");
+    expect(out.join("\n")).toContain("Passkeys: https://door.example.com:8443/passkeys");
+  }, 30_000);
+
   test("refuses to open without a name or an allowlist, and says what is missing", async () => {
     expect(await run(["on", "--allow", ME])).toBe(1);
     expect(err.join("\n")).toContain("--host inbox.example.com");

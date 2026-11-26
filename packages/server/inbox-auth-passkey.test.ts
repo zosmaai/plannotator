@@ -604,6 +604,88 @@ describe("passkeys at the sign-in door", () => {
     expect(location.gone).toBe("/inbox");
   }, 30_000);
 
+  test("a door published at a port mints its passkeys for that address", async () => {
+    // The bug this guards: a proxy that ends TLS off at a port (`tailscale serve --https=4255`) forwards
+    // `Host: inbox.example.com:4255`, but the door named itself `https://inbox.example.com`, so the
+    // ceremony was refused for the one address it is published at — and a key minted for the bare host
+    // could never be offered back. So the address, port and all, is what passkeys are minted for.
+    const listener = freePort();
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxAuth: { on: true, host: HOST, allow: [ME], port: listener, httpsPort: 4255 } }));
+    const inbox = await startInboxServer({ dataDir, htmlContent: HTML });
+    servers.push(inbox);
+    const base = `http://127.0.0.1:${listener}`;
+    await waitForDoor(base);
+    const at = `https://${HOST}:4255`;
+
+    // The account is made through the same address, so its rows and its secret are the running door's.
+    const instance = await openInboxAuth({ dataDir, baseUrl: at, allow: [ME] });
+    try {
+      await instance.set({ email: ME, password: PASSWORD });
+    } finally {
+      instance.close();
+    }
+
+    const jar = new Jar();
+    const headers = (extra: Record<string, string> = {}) => ({
+      Host: `${HOST}:4255`,
+      origin: at,
+      "x-forwarded-proto": "https",
+      "x-forwarded-host": `${HOST}:4255`,
+      "x-forwarded-for": nextClient(),
+      ...extra,
+    });
+    const signed = await fetch(`${base}/api/auth/sign-in/email`, {
+      method: "POST",
+      headers: headers({ "content-type": "application/json" }),
+      body: JSON.stringify({ email: ME, password: PASSWORD }),
+    });
+    jar.absorb(signed);
+    expect(signed.status).toBe(200);
+
+    const register = async (key: FixtureKey, ceremonyOrigin: string) => {
+      const started = await fetch(`${base}/api/auth/passkey/generate-register-options`, { method: "GET", headers: headers({ cookie: jar.header }) });
+      jar.absorb(started);
+      const options = (await started.json()) as Record<string, unknown>;
+      expect(started.status).toBe(200);
+      const verify = await fetch(`${base}/api/auth/passkey/verify-registration`, {
+        method: "POST",
+        headers: headers({ "content-type": "application/json", cookie: jar.header }),
+        body: JSON.stringify({ response: JSON.parse(registrationResponse({ key, rpId: HOST, origin: ceremonyOrigin, challenge: String(options.challenge ?? "") })), name: "Pixel laptop" }),
+      });
+      jar.absorb(verify);
+      return { status: verify.status, body: (await verify.json().catch(() => ({}))) as Record<string, unknown> };
+    };
+
+    // Minted for the address with the port: accepted.
+    const key = makeFixtureKey();
+    expect((await register(key, at)).status).toBe(200);
+    expect(await passkeyRows()).toHaveLength(1);
+
+    // Minted for the bare host: this door is not at that address, so it would never be able to honour
+    // the key. Refused, and nothing new lands.
+    expect((await register(makeFixtureKey(), `https://${HOST}`)).status).toBe(400);
+    expect(await passkeyRows()).toHaveLength(1);
+
+    // And the key that landed signs in at that address. A ceremony keeps its challenge in a cookie, so
+    // this one gets its own jar: nothing of the password session is sent.
+    const row = (await passkeyRows())[0];
+    const ceremony = new Jar();
+    const started = await fetch(`${base}/api/auth/passkey/generate-authenticate-options`, { method: "GET", headers: headers() });
+    ceremony.absorb(started);
+    const options = (await started.json()) as Record<string, unknown>;
+    expect(started.status).toBe(200);
+    const asserted = await fetch(`${base}/api/auth/passkey/verify-authentication`, {
+      method: "POST",
+      headers: headers({ "content-type": "application/json", cookie: ceremony.header }),
+      body: JSON.stringify({
+        response: JSON.parse(assertionResponse({ key, rpId: HOST, origin: at, challenge: String(options.challenge ?? ""), credentialId: String(row.credentialID), counter: 1 })),
+      }),
+    });
+    const session = new Jar();
+    session.absorb(asserted);
+    expect({ status: asserted.status, signedIn: session.session !== "" }).toEqual({ status: 200, signedIn: true });
+  }, 60_000);
+
   test("a passkey cannot be added without a session", async () => {
     const { base } = await startWithAccounts();
     await seed(ME);

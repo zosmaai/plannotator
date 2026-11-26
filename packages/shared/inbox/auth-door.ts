@@ -14,6 +14,20 @@ import { isEmailAddress, isPublicDnsName, normalizeCfAccessEmail } from "./cf-ac
 
 export const INBOX_AUTH_ENV = "PLANNOTATOR_INBOX_AUTH";
 export const INBOX_AUTH_PORT_ENV = "PLANNOTATOR_INBOX_AUTH_PORT";
+/**
+ * The HTTPS port: the port people type after the name when whatever publishes this door ends TLS on a
+ * port other than 443. `tailscale serve --https=4255` is exactly that, and the browser at
+ * `https://inbox.example.com:4255` then sends `Host: inbox.example.com:4255` and an `Origin` with the
+ * same port.
+ *
+ * This is configured on purpose and never read off the `Host` header the door is asked to answer. The
+ * `Host` check is a name allowlist; a door that learned its own HTTPS port from that header would let
+ * anything able to reach the loopback port teach it to trust `https://any-name:any-port` as an origin,
+ * and would move a passkey's relying party to that name. Trusting what a proxy forwards is fine for a
+ * same-site page redirect, which is what a guessed port would be used for; it is not fine for the
+ * origin a credential is minted for or the origin a sign-in is accepted from.
+ */
+export const INBOX_AUTH_HTTPS_PORT_ENV = "PLANNOTATOR_INBOX_AUTH_HTTPS_PORT";
 export const INBOX_AUTH_HOST_ENV = "PLANNOTATOR_INBOX_AUTH_HOST";
 export const INBOX_AUTH_ALLOW_ENV = "PLANNOTATOR_INBOX_AUTH_ALLOW";
 /** The secret better-auth signs sessions with. Generated into the data folder when unset. */
@@ -41,14 +55,75 @@ export interface InboxAuthStored {
   port?: number;
   host?: string;
   allow?: string[];
+  /**
+   * The port the public address carries, when the proxy ends TLS there instead of on 443: `4255` for
+   * `tailscale serve --https=4255`, so people sign in at `https://inbox.example.com:4255`. Absent (or
+   * null, which a save writes when the field is cleared) means 443, which is what `https://<host>`
+   * already means.
+   */
+  httpsPort?: number | null;
 }
 
 export interface InboxAuthSettings {
   port: number;
   host: string;
   allow: string[];
-  /** What better-auth calls itself: the public address people sign in at. */
+  /** The published HTTPS port; null when TLS ends at 443 so the address carries no port. */
+  httpsPort: number | null;
+  /** What better-auth calls itself: the public address people sign in at, port and all. */
   baseUrl: string;
+}
+
+/**
+ * The address people sign in at, from what config.json holds: `https://<host>`, with `:<httpsPort>`
+ * when one was named. Null when no host is configured.
+ *
+ * One place derives it, so the door's `baseUrl`, its card, its CLI line and its pages cannot disagree
+ * about whether the address carries a port — and a browser compares `Origin` against exactly that.
+ */
+export function authDoorUrl(stored: Pick<InboxAuthStored, "host" | "httpsPort"> | null | undefined): string | null {
+  const host = typeof stored?.host === "string" ? stored.host.trim().toLowerCase().replace(/\.$/, "") : "";
+  if (!host) return null;
+  const httpsPort = typeof stored?.httpsPort === "number" ? stored.httpsPort : null;
+  return `https://${host}${httpsPort ? `:${httpsPort}` : ""}`;
+}
+
+/**
+ * Does this `Host` header name this door?
+ *
+ * The bare name, the name with `:443`, and — only when the person configured one — the name with its
+ * published HTTPS port. A proxy that ends TLS on a port passes it straight through (`tailscale serve
+ * --https=4255` gives `Host: inbox.example.com:4255`), so refusing the port as well would turn away the
+ * very address the door is published at. Stripping any port instead would let the same name with a
+ * made-up port through the gate, and it is that same name-plus-port that the Origin check and each
+ * passkey's origin are matched against; so the allowed ports come from the settings, never from the
+ * header.
+ */
+export function doorAnswersHost(
+  hostHeader: string | null | undefined,
+  settings: Pick<InboxAuthSettings, "host" | "httpsPort">,
+): boolean {
+  const header = (hostHeader ?? "").trim().toLowerCase().replace(/\.$/, "");
+  if (header === "") return true;
+  const match = /^(.*?)(?::(\d+))?$/.exec(header);
+  const host = match?.[1] ?? "";
+  const port = match?.[2] ? Number.parseInt(match[2], 10) : null;
+  if (host !== settings.host) return false;
+  return port === null || port === 443 || (settings.httpsPort !== null && port === settings.httpsPort);
+}
+
+/**
+ * Did the request reach the door over TLS?
+ *
+ * The door listens on plain loopback HTTP; whatever publishes it ends TLS and says so in
+ * `x-forwarded-proto`. A missing header says nothing, so nothing is refused on a guess. `http` says the
+ * browser is on an `http://` address, where a passkey cannot be minted at all and where the door's own
+ * `__Secure-` session cookie cannot exist either — so the passkey ceremony is refused there instead of
+ * running along until WebAuthn fails.
+ */
+export function arrivedOverTls(headers: Headers): boolean {
+  const proto = (headers.get("x-forwarded-proto") ?? "").split(",")[0]?.trim().toLowerCase() ?? "";
+  return proto === "" || proto === "https";
 }
 
 export type InboxAuthResolution =
@@ -102,12 +177,30 @@ export function parseInboxAuthSettings(
   if (!Number.isInteger(port) || port < 1024 || port > 65535) return { error: "The listener port must be from 1024 to 65535." };
   if (forbiddenPort(port)) return { error: `Port ${port} is kept for the Inbox's own use.` };
 
+  /**
+   * The port the public address carries. It joins the host in `baseUrl`, which is the `Origin`
+   * better-auth accepts a sign-in from and the origin a passkey is minted for; leaving it out is what
+   * makes a door published at `https://<host>:4255` refuse the very address it works at, with
+   * `INVALID_ORIGIN`.
+   */
+  const httpsPortRaw = env[INBOX_AUTH_HTTPS_PORT_ENV] ?? stored.httpsPort;
+  let httpsPort: number | null = null;
+  if (httpsPortRaw !== undefined && httpsPortRaw !== null && String(httpsPortRaw).trim() !== "") {
+    const parsed = typeof httpsPortRaw === "number" ? httpsPortRaw : Number.parseInt(String(httpsPortRaw), 10);
+    // 443 is already what `https://<host>` means: writing it down would put `:443` into an address no
+    // browser ever sends, which is the same bug in the other direction.
+    if (!Number.isInteger(parsed) || parsed < 1024 || parsed > 65535) {
+      return { error: "The HTTPS port is the port people type after the name, where your proxy ends TLS (tailscale serve --https=4255). Leave it out when TLS ends at 443." };
+    }
+    httpsPort = parsed;
+  }
+
   const allow = parseAuthAllowList(env[INBOX_AUTH_ALLOW_ENV] ?? stored.allow);
   if (allow.length === 0) return { error: "The allowlist must name at least one e-mail address." };
   const bad = allow.find((email) => !isEmailAddress(email));
   if (bad) return { error: `"${bad}" is not an e-mail address.` };
 
-  return { port, host, allow, baseUrl: `https://${host}` };
+  return { port, host, allow, httpsPort, baseUrl: authDoorUrl({ host, httpsPort })! };
 }
 
 export function resolveInboxAuth(

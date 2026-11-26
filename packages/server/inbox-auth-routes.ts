@@ -69,7 +69,9 @@ export interface AuthView {
   on: boolean;
   host: string;
   port: number;
-  /** Where people sign in, or empty when there is no address to sign in at. */
+  /** The published HTTPS port, or null when TLS ends at 443 and the address carries none. */
+  httpsPort: number | null;
+  /** Where people sign in, or empty when there is no address to sign in at. With the port when there is one. */
   url: string;
   /** The addresses that may enter. */
   allow: string[];
@@ -124,12 +126,18 @@ export function createAuthRoutes(context: AuthRouteContext) {
       on: state.on,
       host,
       port,
-      url: host ? `https://${host}${AUTH_LOGIN_PATH}` : "",
+      httpsPort: settings?.httpsPort ?? stored?.httpsPort ?? null,
+      // The address the door answers at, port and all: this is what the card shows and what a passkey
+      // was minted for, so it must not be the bare host when the door is published at a port.
+      url: settings ? `${settings.baseUrl}${AUTH_LOGIN_PATH}` : host ? `https://${host}${AUTH_LOGIN_PATH}` : "",
       allow,
       error: resolved.error ?? state.error ?? "",
       minPasswordLength: AUTH_MIN_PASSWORD_LENGTH,
       accounts: await accountsOf(config, allow),
-      pinnedByEnvironment: process.env["PLANNOTATOR_INBOX_AUTH_HOST"] !== undefined || process.env["PLANNOTATOR_INBOX_AUTH_ALLOW"] !== undefined,
+      pinnedByEnvironment:
+        process.env["PLANNOTATOR_INBOX_AUTH_HOST"] !== undefined ||
+        process.env["PLANNOTATOR_INBOX_AUTH_ALLOW"] !== undefined ||
+        process.env["PLANNOTATOR_INBOX_AUTH_HTTPS_PORT"] !== undefined,
     };
   }
 
@@ -181,16 +189,30 @@ export function createAuthRoutes(context: AuthRouteContext) {
     const host = typeof body?.["host"] === "string" ? body["host"] : stored.host ?? "";
     const allow = body?.["allow"] !== undefined ? parseAuthAllowList(body["allow"]) : stored.allow ?? [];
     const port = typeof body?.["port"] === "number" ? body["port"] : stored.port;
-    return parseInboxAuthSettings({ host, allow, port }, process.env, () => false);
+    // The published HTTPS port survives a save that never mentions it, and an explicit null or empty clears
+    // it (left out of what is written), which is how a door published at 443 again carries no port.
+    const httpsPort =
+      body?.["httpsPort"] === null || body?.["httpsPort"] === "" ? undefined : typeof body?.["httpsPort"] === "number" ? body["httpsPort"] : stored.httpsPort;
+    return parseInboxAuthSettings({ host, allow, port, httpsPort }, process.env, () => false);
   }
 
   /**
    * Save and restart: the door re-reads config.json, so it does this instead of being called. Only the
-   * four settings are written — the resolver derives the sign-in address from the host, so a `baseUrl`
-   * left in the file would be a second answer to the same question.
+   * settings are written — the resolver derives the sign-in address from the host and the HTTPS port, so
+   * a `baseUrl` left in the file would be a second answer to the same question.
    */
   async function apply(settings: InboxAuthStored): Promise<AuthView | Refusal> {
-    const landed = saveConfig({ inboxAuth: { on: settings.on, host: settings.host, allow: settings.allow, port: settings.port } });
+    const landed = saveConfig({
+      inboxAuth: {
+        on: settings.on,
+        host: settings.host,
+        allow: settings.allow,
+        port: settings.port,
+        // Only a number is written; the whole `inboxAuth` object is replaced, so leaving the field out is
+        // how the port gets cleared — which is what a card that sent `httpsPort: null` means.
+        ...(typeof settings.httpsPort === "number" ? { httpsPort: settings.httpsPort } : {}),
+      },
+    });
     if (!landed) {
       return {
         error: "The settings could not be saved to config.json. Fix or remove it on this computer, then try again.",
@@ -255,7 +277,7 @@ export function createAuthRoutes(context: AuthRouteContext) {
    */
   function openWithoutHost(config: ReturnType<typeof loadConfig>): { baseUrl: string; allow: string[] } {
     const stored = storedInboxAuth(config) ?? {};
-    const parsed = parseInboxAuthSettings({ host: stored.host ?? "", allow: stored.allow ?? [], port: stored.port }, process.env, () => false);
+    const parsed = parseInboxAuthSettings({ host: stored.host ?? "", allow: stored.allow ?? [], port: stored.port, httpsPort: stored.httpsPort }, process.env, () => false);
     return "error" in parsed ? { baseUrl: `http://127.0.0.1:${stored.port ?? 4352}`, allow: stored.allow ?? [] } : parsed;
   }
 
@@ -289,7 +311,7 @@ export function createAuthRoutes(context: AuthRouteContext) {
 
     if (path === `${AUTH_ROUTE}/allow`) {
       const stored = storedInboxAuth(loadConfig()) ?? {};
-      const parsed = parseInboxAuthSettings({ host: stored.host ?? "", allow: parseAuthAllowList(body?.["allow"]), port: stored.port }, process.env, () => false);
+      const parsed = parseInboxAuthSettings({ host: stored.host ?? "", allow: parseAuthAllowList(body?.["allow"]), port: stored.port, httpsPort: stored.httpsPort }, process.env, () => false);
       if ("error" in parsed) {
         const allow = parseAuthAllowList(body?.["allow"]);
         return context.json({ error: parsed.error, code: allow.length === 0 ? "empty_allow" : "bad_allow" } satisfies Refusal, 400);
