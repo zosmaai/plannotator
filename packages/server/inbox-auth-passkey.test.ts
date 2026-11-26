@@ -638,10 +638,9 @@ describe("passkeys at the sign-in door", () => {
     jar.absorb(signed);
     expect(signed.status).toBe(200);
 
-    // A passkey ceremony there is refused before better-auth sees it, and a self-asserted
-    // `x-forwarded-proto: https` from the same request does not open it: anything that can reach this
-    // loopback port can write that header, and a proxy that really did end TLS sends the same thing. The
-    // header can only ever close a ceremony, never unlock one.
+    // A passkey ceremony there is refused before better-auth sees it, because the address is the port and
+    // not the name a key belongs to; `x-forwarded-proto` plays no part in the answer either way, so a
+    // self-asserted `https` from the same request changes nothing.
     for (const extra of [{}, { "x-forwarded-proto": "https" }, { "x-forwarded-proto": "https", "x-forwarded-host": HOST }]) {
       const started = await fetch(`${base}/api/auth/passkey/generate-register-options`, { method: "GET", headers: headers({ cookie: jar.header, ...extra }) });
       expect(started.status).toBe(403);

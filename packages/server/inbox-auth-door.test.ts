@@ -283,49 +283,51 @@ describe("the sign-in door", () => {
     expect(body).toContain(`Passkeys need <strong>https://${HOST}</strong>.`);
   }, 30_000);
 
-  test("refuses a passkey ceremony that arrived over plain HTTP", async () => {
-    // The door listens on loopback HTTP; the proxy in front says what the browser saw. On an arrival
-    // reported as `http` a passkey cannot be minted at all, so the door says so instead of showing a page
-    // whose button fails. The password path is held to none of this.
+  test("offers the passkey page when a proxy under-reports TLS, and still refuses a published port", async () => {
+    // The door listens on loopback HTTP and cannot see which proxy ended TLS. `x-forwarded-proto` was the
+    // door's guess, and it guessed against the person: a proxy forwarding its own hop as `http` took the
+    // page, the list of keys and the removal of one away from a browser that was on TLS. It reads the
+    // header for nothing now — only the browser knows, and the page says the door's line itself when
+    // `window.isSecureContext` is false. A name that is not this door's, and a port, still refuse.
     const { base } = await startWithAccounts();
     const insecure = { "x-forwarded-proto": "http" };
     await seed(ME);
     const signed = await fetch(`${base}/api/auth/sign-in/email`, {
       method: "POST",
-      headers: { Host: `${HOST}:4255`, "content-type": "application/json", origin: `https://${HOST}:4255`, ...insecure },
+      headers: { Host: HOST, "content-type": "application/json", origin: `https://${HOST}`, ...insecure },
       body: JSON.stringify({ email: ME, password: PASSWORD }),
     });
     expect(signed.status).toBe(200);
     const cookie = signed.headers.get("set-cookie")?.split(";")[0] ?? "";
 
-    const page = await fetch(`${base}/passkeys`, { headers: { Host: `${HOST}:4255`, cookie, ...insecure } });
-    expect(page.status).toBe(403);
-    expect(((await page.json()) as { code: string; error: string }).code).toBe("insecure_connection");
+    // The page, the list and the removal answer at the address the keys belong to, whatever the proxy says
+    // about the scheme — the last of those is the one that can only ever make an account safer.
+    const page = await fetch(`${base}/passkeys`, { headers: { Host: HOST, cookie, ...insecure } });
+    expect(page.status).toBe(200);
+    const management = await page.text();
+    expect(management).toContain("A passkey signs you in to");
+    // …and it names the bare address, because that is where the key lives whatever port this door answers.
+    expect(management).toContain(`A passkey signs you in to <strong>${passkeyOrigin({ host: HOST })}</strong>`);
 
-    const listed = await fetch(`${base}/api/inbox/auth/passkeys`, { headers: { Host: `${HOST}:4255`, cookie, ...insecure } });
-    expect(listed.status).toBe(403);
-    expect(((await listed.json()) as { code: string }).code).toBe("insecure_connection");
+    const listed = await fetch(`${base}/api/inbox/auth/passkeys`, { headers: { Host: HOST, cookie, ...insecure } });
+    expect(listed.status).toBe(200);
 
-    // better-auth's own ceremony routes, before it has anything to say.
+    // A port still refuses the ceremony, and now for the only reason that is real: a key belongs to the
+    // bare name, so a page at `:4255` could only ever fail WebAuthn's own origin check. The door says its
+    // line instead of running one.
     const ceremony = await fetch(`${base}/api/auth/passkey/generate-register-options`, {
       method: "GET",
       headers: { Host: `${HOST}:4255`, origin: `https://${HOST}:4255`, ...insecure },
     });
     expect(ceremony.status).toBe(403);
     expect(((await ceremony.json()) as { code: string; error: string }).code).toBe("insecure_connection");
+    const atPort = await fetch(`${base}/passkeys`, { headers: { Host: `${HOST}:4255`, cookie, ...insecure } });
+    expect(atPort.status).toBe(403);
+    expect(((await atPort.json()) as { code: string; error: string }).code).toBe("insecure_connection");
 
-    // The window is not held to this: a proxy may forward its own loopback hop as `http` while serving the
-    // person TLS, and only a ceremony needs a secure page.
-    const window = await fetch(`${base}/api/inbox/state`, { headers: { Host: `${HOST}:4255`, origin: `https://${HOST}:4255`, cookie, ...insecure } });
+    // The window is held to none of this, and never was: only a ceremony needs a secure page.
+    const window = await fetch(`${base}/api/inbox/state`, { headers: { Host: HOST, origin: `https://${HOST}`, cookie, ...insecure } });
     expect(await window.text()).not.toContain("insecure_connection");
-
-    // At the address the keys belong to, the same routes answer — there the arrival is `https://<host>`.
-    const secure = await fetch(`${base}/passkeys`, { headers: { Host: HOST, cookie } });
-    expect(secure.status).toBe(200);
-    const management = await secure.text();
-    expect(management).toContain("A passkey signs you in to");
-    // …and it names the bare address, because that is where the key lives whatever port this door answers.
-    expect(management).toContain(`A passkey signs you in to <strong>${passkeyOrigin({ host: HOST })}</strong>`);
   }, 30_000);
 
   test("a request that came through the door cannot change the door", async () => {
@@ -427,10 +429,11 @@ describe("the sign-in door", () => {
     expect(doorOffersPasskeys(new Headers({ host: HOST }), { host: HOST })).toBe(true);
     expect(doorOffersPasskeys(new Headers({ host: `${HOST}:443` }), { host: HOST })).toBe(true);
     expect(doorOffersPasskeys(new Headers({ host: HOST, "x-forwarded-proto": "https" }), { host: HOST })).toBe(true);
-    // A header cannot open a ceremony. It can only ever close one: `http` on the first hop refuses, even
-    // at the address the keys belong to, because the browser there is not on a secure page.
-    expect(doorOffersPasskeys(new Headers({ host: HOST, "x-forwarded-proto": "http" }), { host: HOST })).toBe(false);
-    expect(doorOffersPasskeys(new Headers({ host: `${HOST}:443`, "x-forwarded-proto": "http, https" }), { host: HOST })).toBe(false);
+    // The header decides nothing, in either direction: a proxy that forwards its own loopback hop as `http`
+    // while serving the person TLS made the door refuse the page, the list and the removal of a key, and
+    // only the browser knows whether the page it rendered is secure. A wrong name or a port still refuses.
+    expect(doorOffersPasskeys(new Headers({ host: HOST, "x-forwarded-proto": "http" }), { host: HOST })).toBe(true);
+    expect(doorOffersPasskeys(new Headers({ host: `${HOST}:443`, "x-forwarded-proto": "http, https" }), { host: HOST })).toBe(true);
     expect(doorOffersPasskeys(new Headers({ host: `${HOST}:4255`, "x-forwarded-proto": "https" }), { host: HOST })).toBe(false);
     expect(doorOffersPasskeys(new Headers({ host: `${HOST}:9999` }), { host: HOST })).toBe(false);
     expect(doorOffersPasskeys(new Headers(), { host: HOST })).toBe(false);

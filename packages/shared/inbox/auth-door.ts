@@ -180,10 +180,13 @@ export function isLoopbackHost(host: string): boolean {
  *   `:443`, which is `passkeyOrigin`. A ceremony started at `https://<host>:4255` could only ever fail
  *   WebAuthn's own origin check, so the door says its line instead of running one.
  *
- * `x-forwarded-proto` cannot open a ceremony. Anything that can reach this loopback port can write it,
- * and a tailnet proxy that genuinely ended TLS sends exactly what a liar sends — the two are not
- * distinguishable by header. It can only ever close one: a proxy that reports a plain-HTTP arrival gets
- * the door's own refusal rather than a page whose button would throw inside `navigator.credentials`.
+ * `x-forwarded-proto` is not consulted at all. Anything that can reach this loopback port can write it,
+ * and a proxy that genuinely ended TLS sends exactly what a liar sends — the two are not
+ * distinguishable by header — so a rule here can only ever close a ceremony, never open one. It used to,
+ * and that was the wrong trade: a proxy forwarding its own loopback hop as `http` took `/passkeys`, the
+ * list of keys and the removal of one away from a person whose browser was on TLS, and revoking a key is
+ * the one action that only ever makes an account safer. Only the browser knows whether the page it
+ * rendered is secure, and the page says the door's own line itself when `window.isSecureContext` is false.
  *
  * The password door is held to none of this, and neither is the window: only a ceremony needs a secure
  * page, and a proxy may forward its own loopback hop as `http` while serving the person TLS.
@@ -199,12 +202,7 @@ export function doorOffersPasskeys(
   if (isLoopbackHost(at.host)) return true;
   if (at.host !== normalHost(settings.host)) return false;
   if (at.port !== null && at.port !== 443) return false;
-  return forwardedProto(headers) !== "http";
-}
-
-/** What the proxy in front says the browser used: the first hop of the chain, or "" when it says nothing. */
-function forwardedProto(headers: Headers): string {
-  return (headers.get("x-forwarded-proto") ?? "").split(",")[0]?.trim().toLowerCase() ?? "";
+  return true;
 }
 
 export type InboxAuthResolution =
