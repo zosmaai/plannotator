@@ -106,7 +106,7 @@ describe("plannotator inbox auth", () => {
     expect(out.join("\n")).toBe("");
 
     expect(await run(["add", ME], ["short", "short"])).toBe(1);
-    expect(err.join("\n")).toContain("at least 12 characters");
+    expect(err.join("\n")).toContain("at least 10 characters");
 
     expect(await run(["add", ME], [PASSWORD, PASSWORD])).toBe(0);
     expect(out.join("\n")).toContain(`Account ${ME} made`);

@@ -182,16 +182,11 @@ test('first run, nothing found: the first step offers Claude Code, Pi or OpenCod
   await expect(empty.getByText('Send me a test message in my Plannotator Inbox.', { exact: true })).toBeVisible();
   await expect(page.getByText('Projects appear here when an agent writes from one.')).toBeVisible();
 
-  // The Tater mark is Workspaces' sprite: 24 frames over 3.5 s, its first frame under reduced motion.
-  const tater = page.locator('[data-sprite="tater-sidebar"]');
-  const motion = () => tater.evaluate((el) => {
-    const style = getComputedStyle(el);
-    return `${style.animationName} ${style.animationDuration} ${style.animationTimingFunction} ${style.animationPlayState}`;
-  });
-  expect(await motion()).toBe('ib-tater-sidebar 3.5s steps(24) running');
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  expect((await motion()).startsWith('none ')).toBe(true);
-  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  // The brand row wears this fork's own mark: Zosma AI's tile and Z, one static SVG, no sprite.
+  const mark = page.locator('[data-mark="zosma"]');
+  await expect(mark).toHaveCount(1);
+  await expect(mark.locator('svg path')).toHaveCount(1);
+  await expect(page.locator('[data-sprite="tater-sidebar"]')).toHaveCount(0);
 
   // One next step (inbox-connect-next-step, variant C): Plannotator's own connections first.
   const step = empty.locator('.ib-cn');

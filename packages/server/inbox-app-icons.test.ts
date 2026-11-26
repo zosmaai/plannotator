@@ -1,7 +1,7 @@
 /**
  * The Inbox as an installed app: the manifest names only icons this server
  * serves, each at the size the file really is, in the person's favicon style.
- * The icons are the studio's files, byte for byte.
+ * Zosma is this fork's own mark; the rest are the studio's files, byte for byte.
  */
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
@@ -9,6 +9,10 @@ import { INBOX_APP_ICON_PATHS, inboxAppIconResponse, inboxManifest } from "./inb
 
 // The studio's files. Never redrawn, resized or re-encoded here.
 const ICON_SHA256: Record<string, string> = {
+  // Zosma: this fork's mark (a white Z on #017CF3), generated from the site's own path.
+  "zosma-180.png": "5d70b92b08b89af070033cb9c3aeaa467087523eef69dc74efbe9781c4c5a371",
+  "zosma-192.png": "a4a6ce03c826a80519f8ce1b94c0f18393914973c34381e2534dde6de312d5b6",
+  "zosma-512.png": "f95259c19d5971dbfa8079aa6e853a0abc2e61c57d4153d32fada8725cd2dccc",
   // Glass: web/apple-touch-icon.png, web/icon-192.png, web/icon-512.png (the files plannotator.ai ships).
   "glass-180.png": "5f5d84c3c72bf0acbcc6e634e037108754794ff9f9c8e3b596d0e7b7c088f4fb",
   "glass-192.png": "f4616566aad3e00fc8c04ebb1dcae8e4ebcd671af99db7fc50e50eefa09a05a5",
@@ -35,7 +39,7 @@ async function served(path: string, style: unknown): Promise<{ status: number; t
 
 describe("the Inbox's web app manifest", () => {
   test("every icon it names is served as a PNG of the size it declares, in each favicon style", async () => {
-    for (const style of ["glass", "yellow", "totman"]) {
+    for (const style of ["zosma", "glass", "yellow", "totman"]) {
       expect(icons(style).length).toBeGreaterThan(0);
       for (const icon of icons(style)) {
         const answer = await served(icon.src, style);
@@ -46,19 +50,21 @@ describe("the Inbox's web app manifest", () => {
     }
   });
 
-  test("the icons follow the favicon style, Glass for anything that is not a style", () => {
+  test("the icons follow the favicon style, Zosma for anything that is not a style", () => {
     const names = (style: unknown) => icons(style).map((icon) => icon.src);
+    expect(names("zosma")).toEqual(["/app-icon/zosma-192.png", "/app-icon/zosma-512.png"]);
     expect(names("glass")).toEqual(["/app-icon/glass-192.png", "/app-icon/glass-512.png"]);
     expect(names("yellow")).toEqual(["/app-icon/yellow-192.png"]);
     expect(names("totman")).toEqual(["/app-icon/face-256.png"]);
-    expect(names("classic")).toEqual(names("glass"));
-    expect(names(undefined)).toEqual(names("glass"));
+    expect(names("classic")).toEqual(names("zosma"));
+    expect(names(undefined)).toEqual(names("zosma"));
   });
 
   test("the manifest is served as a manifest, and the touch icon is the style's", async () => {
     const manifest = inboxAppIconResponse("/manifest.webmanifest", "yellow")!;
     expect(manifest.headers.get("content-type")).toBe("application/manifest+json; charset=utf-8");
     expect(await manifest.json()).toEqual(inboxManifest("yellow"));
+    expect(pngSize((await served("/apple-touch-icon.png", "zosma")).bytes)).toBe("180x180");
     expect(pngSize((await served("/apple-touch-icon.png", "glass")).bytes)).toBe("180x180");
     expect(pngSize((await served("/apple-touch-icon.png", "totman")).bytes)).toBe("256x256");
   });

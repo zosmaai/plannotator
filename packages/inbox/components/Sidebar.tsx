@@ -31,7 +31,7 @@ import { newSessionTip } from '../compose/model';
 import { PinnedRow, type PinnedAction } from './PinnedRow';
 import { useStarredAbove } from '../starredPills';
 import { useInboxTheme } from '../theme';
-import { TaterMark } from './TaterMark';
+import { ZosmaMark } from './ZosmaMark';
 import { ProjectTip } from './ProjectRow';
 import { Tip } from './Tip';
 import { SectionSortToggle } from './SectionSortToggle';
@@ -651,8 +651,8 @@ export function Sidebar(props: SidebarProps) {
   const bottom = layout.bottom.filter(shows);
   const brand = shows('logo') && (
     <div className="ib-brand" data-sidebar-item="logo">
-      <TaterMark />
-      <b>Plannotator</b>
+      <ZosmaMark />
+      <b>Zosma</b>
       <span>Inbox</span>
     </div>
   );

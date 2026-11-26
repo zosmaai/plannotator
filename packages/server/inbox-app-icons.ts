@@ -17,6 +17,12 @@
 import { DEFAULT_FAVICON_STYLE, isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 
 // @ts-ignore - Bun import attribute for an embedded file
+import zosma180 from "../inbox/assets/app-icon/zosma-180.png" with { type: "file" };
+// @ts-ignore - Bun import attribute for an embedded file
+import zosma512 from "../inbox/assets/app-icon/zosma-512.png" with { type: "file" };
+// @ts-ignore - Bun import attribute for an embedded file
+import zosma192 from "../inbox/assets/tab-icon/zosma-192.png" with { type: "file" };
+// @ts-ignore - Bun import attribute for an embedded file
 import glass180 from "../inbox/assets/app-icon/glass-180.png" with { type: "file" };
 // @ts-ignore - Bun import attribute for an embedded file
 import glass512 from "../inbox/assets/app-icon/glass-512.png" with { type: "file" };
@@ -33,6 +39,9 @@ export const INBOX_TOUCH_ICON_ROUTE = "/apple-touch-icon.png";
 
 /** Every app icon, by the name its URL carries (the style is in the name, so a new style is a new URL to the browser). */
 export const INBOX_APP_ICON_PATHS: Readonly<Record<string, string>> = Object.freeze({
+  "zosma-180.png": zosma180,
+  "zosma-192.png": zosma192,
+  "zosma-512.png": zosma512,
   "glass-180.png": glass180,
   "glass-192.png": glass192,
   "glass-512.png": glass512,
@@ -42,6 +51,10 @@ export const INBOX_APP_ICON_PATHS: Readonly<Record<string, string>> = Object.fre
 
 /** A style's icons, smallest first, with the size each file really is. */
 const STYLE_ICONS: Readonly<Record<FaviconStyle, readonly { name: string; size: number }[]>> = {
+  zosma: [
+    { name: "zosma-192.png", size: 192 },
+    { name: "zosma-512.png", size: 512 },
+  ],
   glass: [
     { name: "glass-192.png", size: 192 },
     { name: "glass-512.png", size: 512 },
@@ -52,6 +65,7 @@ const STYLE_ICONS: Readonly<Record<FaviconStyle, readonly { name: string; size: 
 
 /** What `<link rel="apple-touch-icon">` gets: Glass has the studio's 180; the other styles their one large build. */
 const TOUCH_ICON: Readonly<Record<FaviconStyle, string>> = {
+  zosma: "zosma-180.png",
   glass: "glass-180.png",
   yellow: "yellow-192.png",
   totman: "face-256.png",
@@ -66,8 +80,8 @@ const styleOf = (style: unknown): FaviconStyle => (isFaviconStyle(style) ? style
  */
 export function inboxManifest(style: unknown): Record<string, unknown> {
   return {
-    name: "Plannotator Inbox",
-    short_name: "Plannotator",
+    name: "Zosma Inbox",
+    short_name: "Zosma",
     id: "/",
     start_url: "/",
     scope: "/",

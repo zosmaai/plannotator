@@ -7,7 +7,9 @@
 /**
  * The favicon a person picks. The ids are what cookies (`plannotator-favicon`)
  * and config.json (`favicon`) store:
- * - 'glass': the Glass icon, the default for anyone with nothing stored.
+ * - 'zosma': this fork's own icon, the Zosma AI mark on the brand blue, and the
+ *   default for anyone with nothing stored.
+ * - 'glass': the Glass icon.
  * - 'yellow': the Yellow icon, the glass icon with a yellow glass.
  * - 'totman': the Face icon. The id is older than the name: it is what people
  *   picked when this icon was the default, so it keeps meaning this icon.
@@ -15,17 +17,18 @@
  * 'classic' reads as nothing stored, so it shows the default, and nothing
  * rewrites the file or the cookie that holds it.
  */
-export type FaviconStyle = 'glass' | 'yellow' | 'totman';
+export type FaviconStyle = 'zosma' | 'glass' | 'yellow' | 'totman';
 
-export const DEFAULT_FAVICON_STYLE: FaviconStyle = 'glass';
+export const DEFAULT_FAVICON_STYLE: FaviconStyle = 'zosma';
 
 /** The choices, in the order they are shown, with the names people see. */
 export const FAVICON_STYLE_CHOICES: readonly { id: FaviconStyle; label: string }[] = [
+  { id: 'zosma', label: 'Zosma' },
   { id: 'glass', label: 'Glass' },
   { id: 'yellow', label: 'Yellow' },
   { id: 'totman', label: 'Face' },
 ];
 
 export function isFaviconStyle(value: unknown): value is FaviconStyle {
-  return value === 'glass' || value === 'yellow' || value === 'totman';
+  return value === 'zosma' || value === 'glass' || value === 'yellow' || value === 'totman';
 }

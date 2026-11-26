@@ -8,7 +8,7 @@
  * something typed or open, or going around the line's claim; the dialog waiting for a thread read and left, for the
  * line's 60 s, or for a page left still (the owner, 2026-11-10: "Fifteen seconds after the inbox opens"); a choice
  * saving anything (it only shows on this tab); the primary button not following the pick, or not saving the pick
- * through Settings' own write (`POST /api/inbox/settings { favicon }`), Keep Glass included; Escape or a click outside
+ * through Settings' own write (`POST /api/inbox/settings { favicon }`), Keep Zosma included; Escape or a click outside
  * saving anything, sending a Not now, or leaving the tried icon on the tab; the dialog showing again on the same load;
  * a pick made in Settings on this page before the moment not dropping it; a Not now button appearing.
  *
@@ -119,7 +119,7 @@ function Harness({ state }: { state: State }) {
       {choice.stage === 'open' && (
         <TabIconChoice
           phone={false}
-          current={current ?? 'glass'}
+          current={current ?? 'zosma'}
           title="(2) Plannotator Inbox"
           onUse={(style) => {
             void favicon.chooseFavicon(style);
@@ -214,16 +214,19 @@ describe.skipIf(!hasDom)('the tab icon dialog', () => {
   test('a choice shows on this tab only; the one button follows the pick and saves it as Settings does', async () => {
     await opened();
     const d = dialog()!;
-    // Glass is in use (nothing chosen yet): tagged, and the button keeps it. One button: no Not now.
-    expect(d.querySelector('[data-tab-icon-choice="glass"] .ib-lvc-inuse')).not.toBeNull();
+    // Zosma is in use (nothing chosen yet): tagged, and the button keeps it. One button: no Not now.
+    expect(d.querySelector('[data-tab-icon-choice="zosma"] .ib-lvc-inuse')).not.toBeNull();
     expect(d.querySelectorAll('[data-tab-icon-choice] .ib-lvc-inuse')).toHaveLength(1);
     expect(d.querySelectorAll('button')).toHaveLength(1);
     // The owner's labels, pinned on purpose.
-    expect(primary().textContent).toBe('Keep Glass');
+    expect(primary().textContent).toBe('Keep Zosma');
     expect(tabIcon()).toBe(LOADED);
 
-    // Three choices in Settings' order; P is gone.
-    expect([...d.querySelectorAll<HTMLInputElement>('input[type="radio"]')].map((r) => r.value)).toEqual(['glass', 'yellow', 'totman']);
+    // Four choices in Settings' order; P is gone.
+    expect([...d.querySelectorAll<HTMLInputElement>('input[type="radio"]')].map((r) => r.value)).toEqual(['zosma', 'glass', 'yellow', 'totman']);
+    choose('glass');
+    expect(primary().textContent).toBe('Use Glass');
+    expect(tabIcon()).toBe(core.faviconDataUrl('glass'));
     choose('yellow');
     expect(primary().textContent).toBe('Use Yellow');
     expect(tabIcon()).toBe(core.faviconDataUrl('yellow'));
@@ -231,8 +234,8 @@ describe.skipIf(!hasDom)('the tab icon dialog', () => {
     expect(primary().textContent).toBe('Use Face');
     expect(tabIcon()).toBe(core.faviconDataUrl('totman'));
     // Back to the one in use: the tab shows the icon it loaded with.
-    choose('glass');
-    expect(primary().textContent).toBe('Keep Glass');
+    choose('zosma');
+    expect(primary().textContent).toBe('Keep Zosma');
     expect(tabIcon()).toBe(LOADED);
     expect(saves()).toHaveLength(0);
 
@@ -246,11 +249,11 @@ describe.skipIf(!hasDom)('the tab icon dialog', () => {
     expect(claims()).toHaveLength(1);
   });
 
-  test('Keep Glass saves glass: the choice counts as made', async () => {
+  test('Keep Zosma saves the default: the choice counts as made', async () => {
     await opened();
     act(() => primary().click());
     await until(() => saves().length === 1);
-    expect(saves().map((s) => s.body)).toEqual([{ favicon: 'glass' }]);
+    expect(saves().map((s) => s.body)).toEqual([{ favicon: 'zosma' }]);
   });
 
   for (const [way, close] of [

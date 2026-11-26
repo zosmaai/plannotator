@@ -4,6 +4,10 @@ import {
   CLASSIC_FAVICON_DATA_URL,
   CLASSIC_FAVICON_SVG,
   DEFAULT_FAVICON_STYLE,
+  ZOSMA_FAVICON_ICO_BYTES,
+  ZOSMA_FAVICON_ICO_DATA_URL,
+  ZOSMA_FAVICON_PNG_BYTES,
+  ZOSMA_FAVICON_PNG_DATA_URL,
   FACE_FAVICON_PNG_BYTES,
   FACE_FAVICON_PNG_DATA_URL,
   FAVICON_ICO_BYTES,
@@ -106,36 +110,64 @@ describe("favicon style switcher", () => {
     expect(view.getUint32(20)).toBe(64);
   });
 
-  test("each stored id draws its icon: glass Glass, yellow Yellow, totman Face; classic (the removed P) the default", () => {
+  test("each stored id draws its icon: zosma Zosma, glass Glass, yellow Yellow, totman Face; classic (the removed P) the default", () => {
+    expect(faviconDataUrl("zosma")).toBe(ZOSMA_FAVICON_ICO_DATA_URL);
     expect(faviconDataUrl("glass")).toBe(FAVICON_ICO_DATA_URL);
     expect(faviconDataUrl("totman")).toBe(FACE_FAVICON_PNG_DATA_URL);
     expect(faviconDataUrl("yellow")).toBe(YELLOW_FAVICON_ICO_DATA_URL);
+    expect(faviconBody("zosma")).toEqual({ body: ZOSMA_FAVICON_PNG_BYTES, contentType: "image/png" });
     expect(faviconBody("glass")).toEqual({ body: FAVICON_PNG_BYTES, contentType: "image/png" });
     expect(faviconBody("totman")).toEqual({ body: FACE_FAVICON_PNG_BYTES, contentType: "image/png" });
     expect(faviconBody("yellow")).toEqual({ body: YELLOW_FAVICON_PNG_BYTES, contentType: "image/png" });
-    // Nothing stored, or a value from somewhere else: the default, Glass.
-    expect(faviconBody(undefined).body).toBe(FAVICON_PNG_BYTES);
-    expect(faviconBody("navy").body).toBe(FAVICON_PNG_BYTES);
-    // 0.28.57's P, still in some config.json files: the default, Glass, on both URLs.
-    expect(faviconBody("classic")).toEqual({ body: FAVICON_PNG_BYTES, contentType: "image/png" });
-    expect(faviconIcoBody("classic")).toEqual({ body: FAVICON_ICO_BYTES, contentType: "image/x-icon" });
-    expect(DEFAULT_FAVICON_STYLE).toBe("glass");
-    // /favicon.ico: Glass's and Yellow's .ico; Face has none, so its PNG.
+    // Nothing stored, or a value from somewhere else: the default, this fork's Zosma icon.
+    expect(faviconBody(undefined).body).toBe(ZOSMA_FAVICON_PNG_BYTES);
+    expect(faviconBody("navy").body).toBe(ZOSMA_FAVICON_PNG_BYTES);
+    // 0.28.57's P, still in some config.json files: the default, Zosma, on both URLs.
+    expect(faviconBody("classic")).toEqual({ body: ZOSMA_FAVICON_PNG_BYTES, contentType: "image/png" });
+    expect(faviconIcoBody("classic")).toEqual({ body: ZOSMA_FAVICON_ICO_BYTES, contentType: "image/x-icon" });
+    expect(DEFAULT_FAVICON_STYLE).toBe("zosma");
+    // /favicon.ico: Zosma's, Glass's and Yellow's .ico; Face has none, so its PNG.
+    expect(faviconIcoBody("zosma")).toEqual({ body: ZOSMA_FAVICON_ICO_BYTES, contentType: "image/x-icon" });
     expect(faviconIcoBody("glass")).toEqual({ body: FAVICON_ICO_BYTES, contentType: "image/x-icon" });
-    expect(faviconIcoBody(undefined).body).toBe(FAVICON_ICO_BYTES);
+    expect(faviconIcoBody(undefined).body).toBe(ZOSMA_FAVICON_ICO_BYTES);
     expect(faviconIcoBody("totman")).toEqual({ body: FACE_FAVICON_PNG_BYTES, contentType: "image/png" });
     expect(faviconIcoBody("yellow")).toEqual({ body: YELLOW_FAVICON_ICO_BYTES, contentType: "image/x-icon" });
     // The badge base is each style's one PNG.
+    expect(faviconPngDataUrl("zosma")).toBe(ZOSMA_FAVICON_PNG_DATA_URL);
     expect(faviconPngDataUrl("glass")).toBe(FAVICON_PNG_DATA_URL);
     expect(faviconPngDataUrl("totman")).toBe(FACE_FAVICON_PNG_DATA_URL);
     expect(faviconPngDataUrl("yellow")).toBe(YELLOW_FAVICON_PNG_DATA_URL);
+    expect(faviconLinkType("zosma")).toEqual({ type: "image/x-icon", sizes: "16x16 32x32 48x48" });
     expect(faviconLinkType("glass")).toEqual({ type: "image/x-icon", sizes: "16x16 32x32 48x48" });
     expect(faviconLinkType("totman")).toEqual({ type: "image/png", sizes: "64x64" });
     expect(faviconLinkType("yellow")).toEqual({ type: "image/x-icon", sizes: "16x16 32x32 48x48" });
   });
 
-  test("the picker offers Glass, Yellow and Face, in that order; P is gone", () => {
-    expect(FAVICON_STYLE_CHOICES.map(({ id, label }) => `${id}:${label}`)).toEqual(["glass:Glass", "yellow:Yellow", "totman:Face"]);
+  test("the Zosma icon is a three-frame .ico (16, 32, 48) and the same mark as a 64 px PNG", () => {
+    const ico = ZOSMA_FAVICON_ICO_BYTES;
+    const view = new DataView(ico.buffer, ico.byteOffset, ico.byteLength);
+    expect(view.getUint16(0, true)).toBe(0); // reserved
+    expect(view.getUint16(2, true)).toBe(1); // an icon, not a cursor
+    expect(view.getUint16(4, true)).toBe(3); // three frames
+    expect([0, 1, 2].map((frame) => view.getUint8(6 + 16 * frame))).toEqual([16, 32, 48]);
+    // Every frame is a whole PNG: the signature, then IHDR width and height matching the entry.
+    for (const frame of [0, 1, 2]) {
+      const size = view.getUint32(6 + 16 * frame + 8, true);
+      const offset = view.getUint32(6 + 16 * frame + 12, true);
+      const png = ico.subarray(offset, offset + size);
+      expect(Array.from(png.subarray(0, 8))).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      const entry = [16, 32, 48][frame]!;
+      const pngView = new DataView(png.buffer, png.byteOffset, png.byteLength);
+      expect(pngView.getUint32(16)).toBe(entry);
+      expect(pngView.getUint32(20)).toBe(entry);
+    }
+    const pngView = new DataView(ZOSMA_FAVICON_PNG_BYTES.buffer, ZOSMA_FAVICON_PNG_BYTES.byteOffset, ZOSMA_FAVICON_PNG_BYTES.byteLength);
+    expect(pngView.getUint32(16)).toBe(64);
+    expect(pngView.getUint32(20)).toBe(64);
+  });
+
+  test("the picker offers Zosma, Glass, Yellow and Face, in that order; P is gone", () => {
+    expect(FAVICON_STYLE_CHOICES.map(({ id, label }) => `${id}:${label}`)).toEqual(["zosma:Zosma", "glass:Glass", "yellow:Yellow", "totman:Face"]);
     expect(FAVICON_STYLE_CHOICES.map(({ label }) => label).join(" ")).not.toContain("Totman");
   });
 
@@ -144,6 +176,7 @@ describe("favicon style switcher", () => {
   });
 
   test("isFaviconStyle validates only known styles", () => {
+    expect(isFaviconStyle("zosma")).toBe(true);
     expect(isFaviconStyle("glass")).toBe(true);
     expect(isFaviconStyle("totman")).toBe(true);
     expect(isFaviconStyle("yellow")).toBe(true);

@@ -53,6 +53,17 @@ export interface PasskeyPageOptions {
   next: string;
 }
 
+/**
+ * Zosma AI's mark, the path zosma.ai draws in its own header, white on the brand
+ * blue: this fork's door wears our logo, not Plannotator's (the owner, 2026-11-26).
+ */
+const ZOSMA_MARK_PATH =
+  "M319.503,98.606l-27,180h106.207l12.426-75.715h239.363v40.577c-100.159,82.124-366.996,251.925-366.996,287.926v342l134.999,108h243l134.994-107.694v-352.094l-89.993-90h-171v90s117,0,117,0l45,45.788-.154,260.846-44.847,44.366h-225l-44.999-45v-260.212c25.314-28.22,319.28-227.784,348.107-256.396,27.198-26.996,52.714-189.005-24.724-203.393-44.384-8.246-386.383-9-386.383-9Z";
+
+const ZOSMA_MARK_HTML = `<div class="auth-mark auth-mark-zosma" aria-hidden="true">
+    <svg viewBox="275 90 530 900" height="22" width="13" fill="currentColor" focusable="false"><path d="${ZOSMA_MARK_PATH}"/></svg>
+  </div>`;
+
 const PASSKEY_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="4"/><path d="M12 12l7 7"/><path d="M16 16l2-2"/></svg>';
 
 export function loginPageHtml(options: LoginPageOptions): string {
@@ -63,16 +74,14 @@ export function loginPageHtml(options: LoginPageOptions): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>Sign in · Plannotator</title>
+<title>Sign in · Zosma Inbox</title>
 <link rel="stylesheet" href="/auth.css">
 <script src="/auth.js" defer></script>
 </head>
 <body>
 <main class="auth-card">
-  <div class="auth-mark" aria-hidden="true">
-    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4z"/><path d="M8.5 8.5h7"/><path d="M8.5 12h4.5"/></svg>
-  </div>
-  <h1>Sign in to your Inbox</h1>
+  ${ZOSMA_MARK_HTML}
+  <h1>Sign in to Zosma Inbox</h1>
   <p class="auth-lede">This Inbox lives on <strong>${escapeHtml(options.address)}</strong>. Use the address it knows you by.</p>
   <form id="auth-form" method="post" action="/login" novalidate>
     <input type="hidden" name="next" value="${escapeHtml(options.next)}">
@@ -102,16 +111,14 @@ export function passkeyPageHtml(options: PasskeyPageOptions): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>Passkeys · Plannotator</title>
+<title>Passkeys · Zosma Inbox</title>
 <link rel="stylesheet" href="/auth.css">
 <script src="/auth.js" defer></script>
 <script src="/passkeys.js" defer></script>
 </head>
 <body>
 <main class="auth-card auth-card-wide">
-  <div class="auth-mark" aria-hidden="true">
-    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="4"/><path d="M12 12l7 7"/><path d="M16 16l2-2"/></svg>
-  </div>
+  ${ZOSMA_MARK_HTML}
   <h1>Passkeys for this Inbox</h1>
   <p class="auth-lede">A passkey signs you in to <strong>${escapeHtml(options.address)}</strong> with your fingerprint, your face or a security key, instead of your password.</p>
   <ul class="auth-list" id="passkey-list" aria-live="polite"></ul>
@@ -191,6 +198,8 @@ body {
   color: var(--primary);
   margin-bottom: 16px;
 }
+/* The brand tile: the Zosma mark keeps the brand blue and a white glyph in both themes. */
+.auth-mark-zosma { background: #017cf3; color: #fff; }
 h1 { font-size: 1.0625rem; line-height: 1.35; margin: 0 0 6px; letter-spacing: -0.01em; font-weight: 600; }
 .auth-lede { margin: 0 0 20px; font-size: 0.8125rem; line-height: 1.5; color: var(--muted); }
 .auth-lede strong { color: var(--fg); font-weight: 500; }

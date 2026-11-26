@@ -611,6 +611,86 @@ export const YELLOW_FAVICON_PNG_BYTES = /* @__PURE__ */ Uint8Array.from(
 );
 
 /**
+ * The Zosma favicon (the fork's own mark, zosma.ai: a white Z on the brand blue #017CF3),
+ * 16, 32 and 48 px PNG frames in one .ico, and the same icon as one 64 px PNG.
+ * Drawn from the site's own mark path; rounded square r = 0.22 of the side.
+ */
+export const ZOSMA_FAVICON_ICO_BASE64 = /* @__PURE__ */ [
+  "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",
+  "QmCC",
+].join("");
+
+export const ZOSMA_FAVICON_PNG_BASE64 = /* @__PURE__ */ [
+  "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",
+  "m10NZicAAAAASUVORK5CYII=",
+].join("");
+
+export const ZOSMA_FAVICON_ICO_DATA_URL = `data:image/x-icon;base64,${ZOSMA_FAVICON_ICO_BASE64}`;
+
+export const ZOSMA_FAVICON_ICO_BYTES = /* @__PURE__ */ Uint8Array.from(
+  atob(ZOSMA_FAVICON_ICO_BASE64),
+  (character) => character.charCodeAt(0),
+);
+
+export const ZOSMA_FAVICON_PNG_DATA_URL = `data:image/png;base64,${ZOSMA_FAVICON_PNG_BASE64}`;
+
+export const ZOSMA_FAVICON_PNG_BYTES = /* @__PURE__ */ Uint8Array.from(
+  atob(ZOSMA_FAVICON_PNG_BASE64),
+  (character) => character.charCodeAt(0),
+);
+
+/**
  * Exact historical pre-Totman dark-navy favicon SVG with gold highlight.
  * Byte-identical to the FAVICON_SVG that shipped at 5b91c543^.
  * No longer offered, and 'classic' is no longer a style (favicon-style.ts).
@@ -626,46 +706,50 @@ export const CLASSIC_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" view
 export const CLASSIC_FAVICON_DATA_URL = `data:image/svg+xml;base64,${/* @__PURE__ */ btoa(CLASSIC_FAVICON_SVG)}`;
 
 /**
- * What a `<link rel="icon">` points at for a style: Glass and Yellow are their
- * .ico (the tab picks the 16 or 32 frame), Face is its PNG.
+ * What a `<link rel="icon">` points at for a style: Zosma, Glass and Yellow are
+ * their .ico (the tab picks the 16 or 32 frame), Face is its PNG. Any value that
+ * is not a style reads as the default, Zosma.
  */
 export function faviconDataUrl(style: FaviconStyle): string {
+  if (style === 'glass') return FAVICON_ICO_DATA_URL;
   if (style === 'yellow') return YELLOW_FAVICON_ICO_DATA_URL;
   if (style === 'totman') return FACE_FAVICON_PNG_DATA_URL;
-  return FAVICON_ICO_DATA_URL;
+  return ZOSMA_FAVICON_ICO_DATA_URL;
 }
 
 /** A style's icon as one PNG (what `/favicon.png` serves); the Inbox draws its tab-count badge over it. */
 export function faviconPngDataUrl(style: FaviconStyle): string {
+  if (style === 'glass') return FAVICON_PNG_DATA_URL;
   if (style === 'yellow') return YELLOW_FAVICON_PNG_DATA_URL;
   if (style === 'totman') return FACE_FAVICON_PNG_DATA_URL;
-  return FAVICON_PNG_DATA_URL;
+  return ZOSMA_FAVICON_PNG_DATA_URL;
 }
 
 /** What a `<link rel="icon">` declares for a style: its type, and the sizes it holds. */
 export function faviconLinkType(style: FaviconStyle): { type: 'image/png' | 'image/x-icon'; sizes: string } {
-  if (style === 'yellow') return { type: 'image/x-icon', sizes: FAVICON_ICO_SIZES };
   if (style === 'totman') return { type: 'image/png', sizes: '64x64' };
   return { type: 'image/x-icon', sizes: FAVICON_ICO_SIZES };
 }
 
-/** The frames in the Glass and Yellow .ico files, as a `sizes` attribute. */
+/** The frames in the Zosma, Glass and Yellow .ico files, as a `sizes` attribute. */
 export const FAVICON_ICO_SIZES = '16x16 32x32 48x48';
 
-/** What `/favicon.png` answers for a style (any value that is not a style answers the default). */
+/** What `/favicon.png` answers for a style (any value that is not a style answers the default, Zosma). */
 export function faviconBody(style: unknown): { body: Uint8Array<ArrayBuffer>; contentType: 'image/png' } {
+  if (style === 'glass') return { body: FAVICON_PNG_BYTES, contentType: 'image/png' };
   if (style === 'yellow') return { body: YELLOW_FAVICON_PNG_BYTES, contentType: 'image/png' };
   if (style === 'totman') return { body: FACE_FAVICON_PNG_BYTES, contentType: 'image/png' };
-  return { body: FAVICON_PNG_BYTES, contentType: 'image/png' };
+  return { body: ZOSMA_FAVICON_PNG_BYTES, contentType: 'image/png' };
 }
 
 /**
  * What `/favicon.ico` answers for a style, the URL every app page links first:
- * Glass and Yellow are their .ico; Face has no .ico, so its PNG (a browser reads an
- * icon by its bytes and Content-Type, not by the URL's extension).
+ * Zosma, Glass and Yellow are their .ico; Face has no .ico, so its PNG (a browser
+ * reads an icon by its bytes and Content-Type, not by the URL's extension).
  */
 export function faviconIcoBody(style: unknown): { body: Uint8Array<ArrayBuffer>; contentType: 'image/png' | 'image/x-icon' } {
+  if (style === 'glass') return { body: FAVICON_ICO_BYTES, contentType: 'image/x-icon' };
   if (style === 'yellow') return { body: YELLOW_FAVICON_ICO_BYTES, contentType: 'image/x-icon' };
   if (style === 'totman') return faviconBody(style);
-  return { body: FAVICON_ICO_BYTES, contentType: 'image/x-icon' };
+  return { body: ZOSMA_FAVICON_ICO_BYTES, contentType: 'image/x-icon' };
 }

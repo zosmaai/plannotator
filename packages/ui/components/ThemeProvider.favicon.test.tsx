@@ -8,6 +8,7 @@ import {
   FACE_FAVICON_PNG_DATA_URL,
   FAVICON_ICO_DATA_URL,
   YELLOW_FAVICON_ICO_DATA_URL,
+  ZOSMA_FAVICON_ICO_DATA_URL,
 } from '@plannotator/core/favicon';
 
 const hasDom = typeof document !== 'undefined';
@@ -73,14 +74,14 @@ describe('ThemeProvider favicon synchronization', () => {
     resetStorageBackend();
   });
 
-  test.skipIf(!hasDom)('nothing stored draws Glass', async () => {
+  test.skipIf(!hasDom)('nothing stored draws Zosma', async () => {
     configStore.loadFromBackend();
 
     await mount();
 
     // The .ico with its three frames, so the tab takes the hand-pixelled 16 or 32.
     const link = getFaviconLink();
-    expect(link?.href).toBe(FAVICON_ICO_DATA_URL);
+    expect(link?.href).toBe(ZOSMA_FAVICON_ICO_DATA_URL);
     expect(link?.type).toBe('image/x-icon');
     expect(link?.getAttribute('sizes')).toBe('16x16 32x32 48x48');
   });
@@ -117,7 +118,7 @@ describe('ThemeProvider favicon synchronization', () => {
     expect(glassLink?.getAttribute('sizes')).toBe('16x16 32x32 48x48');
   });
 
-  test.skipIf(!hasDom)('classic, stored by anyone who chose P before it was removed, reads as unset: Glass', async () => {
+  test.skipIf(!hasDom)('classic, stored by anyone who chose P before it was removed, reads as unset: Zosma', async () => {
     stored.set('plannotator-favicon', 'classic');
     configStore.loadFromBackend();
 
@@ -125,7 +126,7 @@ describe('ThemeProvider favicon synchronization', () => {
 
     const link = getFaviconLink();
     expect(link).not.toBeNull();
-    expect(link?.href).toBe(FAVICON_ICO_DATA_URL);
+    expect(link?.href).toBe(ZOSMA_FAVICON_ICO_DATA_URL);
     expect(link?.type).toBe('image/x-icon');
   });
 });

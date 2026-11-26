@@ -19,7 +19,7 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { InboxListSection } from '@plannotator/core/inbox-types';
-import { FACE_FAVICON_PNG_BYTES, FACE_FAVICON_PNG_DATA_URL, FAVICON_PNG_DATA_URL } from '@plannotator/core/favicon';
+import { FACE_FAVICON_PNG_BYTES, FACE_FAVICON_PNG_DATA_URL, ZOSMA_FAVICON_PNG_DATA_URL } from '@plannotator/core/favicon';
 import { resetInboxFaviconForTests } from './faviconChoice';
 
 const hasDom = typeof document !== 'undefined';
@@ -212,8 +212,8 @@ test.skipIf(!hasDom)('the tab counts threads with news the person has not looked
   expect(badges.at(-1)).toBe(1);
   await until(() => iconLabel() === '1', 'the badged icon');
   expect(iconHref().startsWith('data:image/svg+xml')).toBe(true);
-  // The badge is drawn over Glass's hand-pixelled 32 (the server's /favicon.png), not the .ico.
-  expect(decodeURIComponent(iconHref())).toContain(`href="${FAVICON_PNG_DATA_URL}"`);
+  // The badge is drawn over Zosma's hand-pixelled 32 (the server's /favicon.png), not the .ico.
+  expect(decodeURIComponent(iconHref())).toContain(`href="${ZOSMA_FAVICON_PNG_DATA_URL}"`);
 
   // An agent starts a thread: the count rises.
   const fresh = await agentSends('A fresh finding about the build.');
@@ -250,8 +250,8 @@ test.skipIf(!hasDom)('a favicon picked in Settings is the tab icon at once, the 
   const choice = () => document.querySelector<HTMLInputElement>('input[name="ib-favicon"][value="totman"]');
   await until(() => choice() !== null, 'the Favicon row');
   const labels = [...document.querySelectorAll('input[name="ib-favicon"]')].map((input) => input.closest('label')?.textContent);
-  expect(labels).toEqual(['Glass', 'Yellow', 'Face']);
-  expect(document.querySelector<HTMLInputElement>('input[name="ib-favicon"][value="glass"]')?.checked).toBe(true);
+  expect(labels).toEqual(['Zosma', 'Glass', 'Yellow', 'Face']);
+  expect(document.querySelector<HTMLInputElement>('input[name="ib-favicon"][value="zosma"]')?.checked).toBe(true);
 
   act(() => choice()!.click());
   // No reload: the badge is drawn again, over the Face icon.
