@@ -25,11 +25,16 @@ function escapeHtml(value: string): string {
 
 export interface LoginPageOptions {
   /**
-   * The Inbox this page belongs to, shown under the form: the host and the port people sign in at, e.g.
-   * `inbox.example.com` or `inbox.example.com:4255`. Every label that prints it as an address prints it
-   * with the port, because that is the address the passkeys were minted for.
+   * The Inbox this page belongs to, shown under the form: the name and the port this request arrived at,
+   * e.g. `inbox.example.com` or `inbox.example.com:4255`. It is the address in the person's own address
+   * bar, which is what the password works at.
    */
   address: string;
+  /**
+   * The address the passkeys belong to: the name over https, with no port, because that is where a
+   * passkey can be offered back whatever port this door happens to be published at.
+   */
+  passkeyAddress: string;
   /** Where to go after signing in: already through `safeNextPath`. */
   next: string;
   /** A line shown under the form on arrival (`?error=` in the URL, or a refused session). */
@@ -41,7 +46,7 @@ export interface LoginPageOptions {
  * another way through this door, and a person who is not signed in cannot reach the Inbox at all.
  */
 export interface PasskeyPageOptions {
-  /** As on the login page: host and port the passkeys belong to. */
+  /** The address the passkeys belong to: the name over https, never a port. */
   address: string;
   /** Where the page's own links go back to: already through `safeNextPath`. */
   next: string;
@@ -79,7 +84,7 @@ export function loginPageHtml(options: LoginPageOptions): string {
   </form>
   <div class="auth-or"><span>or</span></div>
   <button type="button" id="auth-passkey" class="auth-alt">${PASSKEY_ICON}Sign in with a passkey</button>
-  <p class="auth-foot" id="auth-passkey-note">Passkeys need <strong>https://${escapeHtml(options.address)}</strong>. The password works everywhere.</p>
+  <p class="auth-foot" id="auth-passkey-note">Passkeys need <strong>${escapeHtml(options.passkeyAddress)}</strong>. The password works everywhere.</p>
   <p class="auth-error" id="auth-passkey-error" role="alert" hidden></p>
   <p class="auth-foot">Nobody else can open this Inbox. Your session lasts seven days, then asks again.</p>
   <noscript><p class="auth-error">This page needs JavaScript to sign in.</p></noscript>

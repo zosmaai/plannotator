@@ -29,14 +29,15 @@ import { loadConfig } from "@plannotator/shared/config";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { updateOwnInboxRegistry, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import {
-  arrivedOverTls,
   AUTH_BASE_PATH,
   AUTH_LOGIN_PATH,
   doorAnswersHost,
+  doorOffersPasskeys,
   markFromAuthDoor,
   PASSKEY_API_PATH,
   PASSKEY_JS_PATH,
   PASSKEY_PAGE_PATH,
+  passkeyOrigin,
   resolveInboxAuth,
   safeNextPath,
   withoutAuthCookies,
@@ -161,8 +162,13 @@ export function createInboxAuthDoor(context: InboxAuthDoorContext) {
     log(`[plannotator] Sign-in: not open. ${error} The Inbox runs on this computer as usual.\n`);
   };
 
-  /** What the door's pages call themselves: the host, with the published port when the address carries one. */
-  const doorAddress = (active: InboxAuthSettings) => new URL(active.baseUrl).host;
+  /**
+   * What a page calls this Inbox: the name and the port this very request arrived at, which is the
+   * address in the person's address bar. A request that carried no `Host` at all (a local health check)
+   * falls back to the address from the settings. Passkeys are aimed elsewhere — at `passkeyOrigin`, the
+   * bare name — and the page says so on its own line.
+   */
+  const doorAddress = (active: InboxAuthSettings, req: Request) => req.headers.get("host")?.trim() || new URL(active.baseUrl).host;
 
   const handler = (active: InboxAuthSettings, auth: InboxAuthInstance) => async (req: Request): Promise<Response> => {
     let url: URL;
@@ -173,10 +179,11 @@ export function createInboxAuthDoor(context: InboxAuthDoorContext) {
     }
     const path = url.pathname;
 
-    // 0. Its own name only. A proxy in front passes the public Host through, and anything else reaching this port
-    // (another name pointed here, a page that resolved it) is not the door's business: never a session, never a form.
-    // A publisher that ends TLS on a port passes that port in Host too, so the settings decide which ports are
-    // this door's name — see `doorAnswersHost`.
+    // 0. Its own name only. A proxy in front passes the public Host through — name and the port TLS ended
+    // on, whatever that port is — and anything else reaching this port (another name pointed here, the
+    // loopback address itself) is not the door's business: never a session, never a form. The port is not
+    // part of the name check, because the door is never told which port it is published at and signing
+    // people in must not depend on being told — see `doorAnswersHost`.
     if (!doorAnswersHost(req.headers.get("host"), active)) return jsonError(403, "forbidden_host", "This door answers only its own name.");
 
     // 1. The door's own paths.
@@ -191,17 +198,19 @@ export function createInboxAuthDoor(context: InboxAuthDoorContext) {
         : url.searchParams.get("error") === "session"
           ? "Your session ended. Sign in again."
           : null;
-      const page = loginPageHtml({ address: doorAddress(active), next, error });
+      const page = loginPageHtml({ address: doorAddress(active, req), passkeyAddress: passkeyOrigin(active), next, error });
       return textResponse(req.method === "HEAD" ? "" : page, 200, "text/html; charset=utf-8", { "Content-Security-Policy": AUTH_CSP, "Referrer-Policy": "no-referrer" });
     }
     if (path === "/auth.css") return textResponse(AUTH_CSS, 200, "text/css; charset=utf-8");
     if (path === "/auth.js") return textResponse(AUTH_JS, 200, "text/javascript; charset=utf-8");
     if (path === PASSKEY_JS_PATH) return textResponse(PASSKEY_JS, 200, "text/javascript; charset=utf-8");
     if (path === AUTH_BASE_PATH || path.startsWith(`${AUTH_BASE_PATH}/`)) {
-      // A passkey ceremony needs a secure page; on a plain-HTTP arrival WebAuthn would fail, so refuse it here
-      // and let the login page's own line say what to use instead. Password sign-in is unaffected.
-      if (path.startsWith(`${AUTH_BASE_PATH}/passkey`) && !arrivedOverTls(req.headers)) {
-        return jsonError(403, "insecure_connection", `Passkeys need ${active.baseUrl}. Sign in with the password, or use that address.`);
+      // A passkey ceremony needs a page the browser considers secure, and it can only run at the address
+      // the key belongs to: `passkeyOrigin`, the bare name. Started anywhere else it would fail WebAuthn's
+      // own origin check, so the door refuses it here and lets its own line say what to use instead.
+      // Password sign-in at any port is unaffected.
+      if (path.startsWith(`${AUTH_BASE_PATH}/passkey`) && !doorOffersPasskeys(req.headers, active)) {
+        return jsonError(403, "insecure_connection", `Passkeys need ${passkeyOrigin(active)}. Sign in with the password here, or use that address.`);
       }
       const answer = await auth.auth.handler(req);
       const out = new Headers(answer.headers);
@@ -233,20 +242,21 @@ export function createInboxAuthDoor(context: InboxAuthDoorContext) {
     // whose passkeys it wants, and they never hand a stored key back — only a name, a date and the
     // door's own row id.
     //
-    // A passkey ceremony needs a secure page. Whatever publishes this door ends TLS and says so in
-    // `x-forwarded-proto`; an arrival that says plain HTTP is an `http://` address, where WebAuthn will not
-    // run at all. So the passkey paths answer here rather than rendering a page whose button would fail —
-    // the message names the address with the port, because on a door published at `:4255` that is the only
-    // address whose passkeys work. The password sign-in above is untouched: it has no such rule, and
-    // neither has the window below — a proxy may forward its own loopback hop as `http` and still be
-    // serving the person TLS, and only a ceremony actually needs the page to be secure.
+    // A passkey ceremony needs a page the browser considers secure, and only the address the key belongs
+    // to has that claim: `passkeyOrigin`, the bare name, at `:443` or with no port at all. At any other
+    // port the ceremony would fail WebAuthn's own origin check, and on an arrival a proxy reports as
+    // plain HTTP it would fail inside `navigator.credentials` — so the passkey paths answer here rather
+    // than rendering a page whose button cannot work. The message names the bare address, because that
+    // is where the keys live whatever port this door is published at. The password sign-in above is
+    // untouched, and so is the window below: a proxy may forward its own loopback hop as `http` and still
+    // be serving the person TLS, and only a ceremony needs the page to be secure.
     const isPasskeyPath = path === PASSKEY_PAGE_PATH || path.startsWith(`${PASSKEY_PAGE_PATH}/`) || path === PASSKEY_API_PATH || path.startsWith(`${PASSKEY_API_PATH}/`);
-    if (isPasskeyPath && !arrivedOverTls(req.headers)) {
-      return jsonError(403, "insecure_connection", `Passkeys need ${active.baseUrl}. Sign in with the password, or use that address.`);
+    if (isPasskeyPath && !doorOffersPasskeys(req.headers, active)) {
+      return jsonError(403, "insecure_connection", `Passkeys need ${passkeyOrigin(active)}. Sign in with the password here, or use that address.`);
     }
     if (path === PASSKEY_PAGE_PATH || path === `${PASSKEY_PAGE_PATH}/`) {
       if (req.method !== "GET" && req.method !== "HEAD") return jsonError(405, "method_not_allowed", "Passkeys are managed from their page.");
-      const page = passkeyPageHtml({ address: doorAddress(active), next: safeNextPath(url.searchParams.get("next")) });
+      const page = passkeyPageHtml({ address: passkeyOrigin(active), next: safeNextPath(url.searchParams.get("next")) });
       return textResponse(req.method === "HEAD" ? "" : page, 200, "text/html; charset=utf-8", { "Content-Security-Policy": AUTH_CSP, "Referrer-Policy": "no-referrer" });
     }
     if (path === PASSKEY_API_PATH) {
@@ -304,15 +314,17 @@ export function createInboxAuthDoor(context: InboxAuthDoorContext) {
     void (async () => {
       let made: InboxAuthInstance;
       try {
-        // A passkey is minted for the name the browser sees, which is the door's own host and not the
-        // loopback address behind it — the same host the door answers its `Host` check with.
+        // A passkey is minted for the name the browser sees, and for that name alone: not the loopback
+        // address behind it, and not a port in front of it. `host` is what lets a sign-in's `Origin` follow
+        // the address the request arrived at, at any port, with nothing configured — see `doorOrigins`.
         made = context.instance
           ? await context.instance()
           : await openInboxAuth({
               dataDir: context.dataDir,
               baseUrl: active.baseUrl,
+              host: active.host,
               allow: active.allow,
-              webauthn: { rpID: active.host, origin: active.baseUrl },
+              webauthn: { rpID: active.host, origin: passkeyOrigin(active) },
             });
       } catch (error) {
         if (mine === generation) fail(`Could not open the accounts in ${context.dataDir}: ${error instanceof Error ? error.message : String(error)}`);

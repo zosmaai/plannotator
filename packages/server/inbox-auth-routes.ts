@@ -134,10 +134,12 @@ export function createAuthRoutes(context: AuthRouteContext) {
       error: resolved.error ?? state.error ?? "",
       minPasswordLength: AUTH_MIN_PASSWORD_LENGTH,
       accounts: await accountsOf(config, allow),
+      // Only what the card can see and would otherwise overwrite: the host and the allow list. A pinned
+      // HTTPS port is not one of them — this card has no field for it, so hiding its controls because an
+      // environment variable it cannot read is set would take away ways in for no reason.
       pinnedByEnvironment:
         process.env["PLANNOTATOR_INBOX_AUTH_HOST"] !== undefined ||
-        process.env["PLANNOTATOR_INBOX_AUTH_ALLOW"] !== undefined ||
-        process.env["PLANNOTATOR_INBOX_AUTH_HTTPS_PORT"] !== undefined,
+        process.env["PLANNOTATOR_INBOX_AUTH_ALLOW"] !== undefined,
     };
   }
 

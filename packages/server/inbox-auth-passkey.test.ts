@@ -355,6 +355,17 @@ describe("passkeys at the sign-in door", () => {
     const held = new Jar();
     held.absorb(wrongOrigin);
     expect(held.session).toBe("");
+
+    // The one wrong origin that can genuinely reach this port: the loopback address the door listens on.
+    // Its ceremony routes do answer — the `Host` is the door's own name, so the door lets the ceremony
+    // through — which means the refusal has to come from the assertion. The expected origin stays the
+    // pinned `passkeyOrigin`, and is never widened to whatever address the request arrived at.
+    const fromTheListener = await signInWithPasskey(base, key, credentialId, 3, HOST, base);
+    expect(fromTheListener.status).toBe(400);
+    expect(((await fromTheListener.json()) as { code: string }).code).toBe("AUTHENTICATION_FAILED");
+    const alsoHeld = new Jar();
+    alsoHeld.absorb(fromTheListener);
+    expect(alsoHeld.session).toBe("");
   }, 60_000);
 
   test("a passkey is only ever listed and removed for the signed-in account", async () => {
@@ -604,36 +615,21 @@ describe("passkeys at the sign-in door", () => {
     expect(location.gone).toBe("/inbox");
   }, 30_000);
 
-  test("a door published at a port mints its passkeys for that address", async () => {
-    // The bug this guards: a proxy that ends TLS off at a port (`tailscale serve --https=4255`) forwards
-    // `Host: inbox.example.com:4255`, but the door named itself `https://inbox.example.com`, so the
-    // ceremony was refused for the one address it is published at — and a key minted for the bare host
-    // could never be offered back. So the address, port and all, is what passkeys are minted for.
-    const listener = freePort();
-    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxAuth: { on: true, host: HOST, allow: [ME], port: listener, httpsPort: 4255 } }));
-    const inbox = await startInboxServer({ dataDir, htmlContent: HTML });
-    servers.push(inbox);
-    const base = `http://127.0.0.1:${listener}`;
-    await waitForDoor(base);
+  test("a door published at a port keeps its passkeys on the bare name", async () => {
+    // The owner's setup: `tailscale serve --https=4255` publishes the door at
+    // `https://inbox.example.com:4255`, and nothing in config.json mentions 4255. Password sign-in
+    // follows the request (pinned in `inbox-auth-door.test.ts`). Passkeys do not follow it, and the reason
+    // is not a policy choice: WebAuthn checks a key against the exact origin it was minted for, so a key
+    // made for `https://inbox.example.com:4255` could never come back at the bare name, and would be
+    // stranded the moment the publisher picked a different port. The door mints for `https://<host>` and
+    // says so at every other port, rather than starting a ceremony the browser would then refuse.
+    const { base } = await startWithAccounts();
+    await seed(ME);
     const at = `https://${HOST}:4255`;
+    const headers = (extra: Record<string, string> = {}) => ({ Host: `${HOST}:4255`, origin: at, "x-forwarded-for": nextClient(), ...extra });
 
-    // The account is made through the same address, so its rows and its secret are the running door's.
-    const instance = await openInboxAuth({ dataDir, baseUrl: at, allow: [ME] });
-    try {
-      await instance.set({ email: ME, password: PASSWORD });
-    } finally {
-      instance.close();
-    }
-
+    // The password door is open at that address, and the session it mints works there.
     const jar = new Jar();
-    const headers = (extra: Record<string, string> = {}) => ({
-      Host: `${HOST}:4255`,
-      origin: at,
-      "x-forwarded-proto": "https",
-      "x-forwarded-host": `${HOST}:4255`,
-      "x-forwarded-for": nextClient(),
-      ...extra,
-    });
     const signed = await fetch(`${base}/api/auth/sign-in/email`, {
       method: "POST",
       headers: headers({ "content-type": "application/json" }),
@@ -642,48 +638,33 @@ describe("passkeys at the sign-in door", () => {
     jar.absorb(signed);
     expect(signed.status).toBe(200);
 
-    const register = async (key: FixtureKey, ceremonyOrigin: string) => {
-      const started = await fetch(`${base}/api/auth/passkey/generate-register-options`, { method: "GET", headers: headers({ cookie: jar.header }) });
-      jar.absorb(started);
-      const options = (await started.json()) as Record<string, unknown>;
-      expect(started.status).toBe(200);
-      const verify = await fetch(`${base}/api/auth/passkey/verify-registration`, {
-        method: "POST",
-        headers: headers({ "content-type": "application/json", cookie: jar.header }),
-        body: JSON.stringify({ response: JSON.parse(registrationResponse({ key, rpId: HOST, origin: ceremonyOrigin, challenge: String(options.challenge ?? "") })), name: "Pixel laptop" }),
-      });
-      jar.absorb(verify);
-      return { status: verify.status, body: (await verify.json().catch(() => ({}))) as Record<string, unknown> };
-    };
+    // A passkey ceremony there is refused before better-auth sees it, and a self-asserted
+    // `x-forwarded-proto: https` from the same request does not open it: anything that can reach this
+    // loopback port can write that header, and a proxy that really did end TLS sends the same thing. The
+    // header can only ever close a ceremony, never unlock one.
+    for (const extra of [{}, { "x-forwarded-proto": "https" }, { "x-forwarded-proto": "https", "x-forwarded-host": HOST }]) {
+      const started = await fetch(`${base}/api/auth/passkey/generate-register-options`, { method: "GET", headers: headers({ cookie: jar.header, ...extra }) });
+      expect(started.status).toBe(403);
+      expect(((await started.json()) as { code: string }).code).toBe("insecure_connection");
+    }
+    expect(await passkeyRows()).toHaveLength(0);
 
-    // Minted for the address with the port: accepted.
+    // At the address the keys belong to — the bare name — the same account runs the ceremony, and the key
+    // it mints signs in there.
+    const bare = await signInJar(base, ME);
     const key = makeFixtureKey();
-    expect((await register(key, at)).status).toBe(200);
-    expect(await passkeyRows()).toHaveLength(1);
+    const registered = await registerPasskey(base, bare, key, "Pixel laptop");
+    expect(registered.status).toBe(200);
+    const rows = await passkeyRows();
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
+    expect((await signInWithPasskey(base, key, String(row.credentialID), 1)).status).toBe(200);
 
-    // Minted for the bare host: this door is not at that address, so it would never be able to honour
-    // the key. Refused, and nothing new lands.
-    expect((await register(makeFixtureKey(), `https://${HOST}`)).status).toBe(400);
-    expect(await passkeyRows()).toHaveLength(1);
-
-    // And the key that landed signs in at that address. A ceremony keeps its challenge in a cookie, so
-    // this one gets its own jar: nothing of the password session is sent.
-    const row = (await passkeyRows())[0];
-    const ceremony = new Jar();
-    const started = await fetch(`${base}/api/auth/passkey/generate-authenticate-options`, { method: "GET", headers: headers() });
-    ceremony.absorb(started);
-    const options = (await started.json()) as Record<string, unknown>;
-    expect(started.status).toBe(200);
-    const asserted = await fetch(`${base}/api/auth/passkey/verify-authentication`, {
-      method: "POST",
-      headers: headers({ "content-type": "application/json", cookie: ceremony.header }),
-      body: JSON.stringify({
-        response: JSON.parse(assertionResponse({ key, rpId: HOST, origin: at, challenge: String(options.challenge ?? ""), credentialId: String(row.credentialID), counter: 1 })),
-      }),
-    });
-    const session = new Jar();
-    session.absorb(asserted);
-    expect({ status: asserted.status, signedIn: session.session !== "" }).toEqual({ status: 200, signedIn: true });
+    // And that key is not offered at the port: the door answers the ceremony routes there with its own
+    // refusal, which is what the person needs to see instead of a browser that fails mid-ceremony.
+    const ported = await fetch(`${base}/api/auth/passkey/generate-authenticate-options`, { method: "GET", headers: headers() });
+    expect(ported.status).toBe(403);
+    expect(((await ported.json()) as { code: string }).code).toBe("insecure_connection");
   }, 60_000);
 
   test("a passkey cannot be added without a session", async () => {

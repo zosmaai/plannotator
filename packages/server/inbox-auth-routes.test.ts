@@ -134,6 +134,45 @@ describe("the sign-in card's routes", () => {
     expect(answer.body["allow"]).toEqual([ME]);
   });
 
+  test("a pinned published port survives a save that never mentions it", async () => {
+    // `httpsPort` is opt-in and this card has no field for it — signing in at a published port needs no
+    // setting at all — so the two ways a save could go wrong are inventing one and losing one. The test
+    // above already shows the first: a door with no pin has no `httpsPort` key in config.json at all.
+    await send("account", { email: ME, password: "correct horse battery" });
+    await send("on", { host: HOST, allow: [ME], httpsPort: 4255 });
+    expect(saved()?.inboxAuth?.httpsPort).toBe(4255);
+
+    // The card's own saves — the list, the switch, the address again — never carry the field, and each one
+    // must write back what is stored rather than dropping it.
+    await send("allow", { allow: [ME, "someone@example.com"] });
+    expect(saved()?.inboxAuth?.httpsPort).toBe(4255);
+    expect((await send("on", { host: HOST, allow: [ME] })).status).toBe(200);
+    expect(saved()?.inboxAuth?.httpsPort).toBe(4255);
+    // What a pinned door calls itself carries the port; that is the whole of what the pin does.
+    expect((await read()).body["url"]).toBe(`https://${HOST}:4255/login`);
+  });
+
+  test("a published port set in the environment does not strip the card's controls", async () => {
+    // The card is pinned by what it would otherwise overwrite — the host and the list. A port it has no
+    // field for is nobody's business to hide its controls over.
+    process.env["PLANNOTATOR_INBOX_AUTH_HTTPS_PORT"] = "4255";
+    try {
+      await send("account", { email: ME, password: "correct horse battery" });
+      const answer = await send("on", { host: HOST, allow: [ME] });
+      expect(answer.body["pinnedByEnvironment"]).toBe(false);
+      expect(answer.body["url"]).toBe(`https://${HOST}:4255/login`); // the environment pin still sets the address
+    } finally {
+      delete process.env["PLANNOTATOR_INBOX_AUTH_HTTPS_PORT"];
+    }
+    // The two the card *can* write stay pinned when the environment has them.
+    process.env["PLANNOTATOR_INBOX_AUTH_HOST"] = HOST;
+    try {
+      expect((await read()).body["pinnedByEnvironment"]).toBe(true);
+    } finally {
+      delete process.env["PLANNOTATOR_INBOX_AUTH_HOST"];
+    }
+  });
+
   test("refuses settings that would leave the door unusable, and writes nothing", async () => {
     await send("account", { email: ME, password: "correct horse battery" });
     for (const [body, code] of [

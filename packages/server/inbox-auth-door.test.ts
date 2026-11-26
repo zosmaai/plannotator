@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { arrivedOverTls, doorAnswersHost, safeNextPath, withoutAuthCookies } from "@plannotator/shared/inbox/auth-door";
+import { doorAnswersHost, doorOffersPasskeys, doorOrigins, passkeyOrigin, safeNextPath, withoutAuthCookies } from "@plannotator/shared/inbox/auth-door";
 import { openInboxAuth } from "./inbox-auth-instance";
 import { startInboxServer, type InboxServer } from "./inbox";
 
@@ -189,44 +189,108 @@ describe("the sign-in door", () => {
     }
   }, 30_000);
 
-  test("answers the name with the port its proxy ends TLS at", async () => {
-    // `tailscale serve --https=4255` forwards `Host: inbox.example.com:4255`. A door that only answers the
-    // bare name turns away the one address it is published at, and the sign-in page never loads.
-    const { base, inbox } = await startWithAccounts({ httpsPort: 4255 });
-    const at = await fetch(`${base}/login`, { headers: { Host: `${HOST}:4255` } });
-    expect(at.status).toBe(200);
-    // The name alone and the name at 443 are the same address, so they still answer.
-    expect((await fetch(`${base}/login`, { headers: { Host: HOST } })).status).toBe(200);
-    expect((await fetch(`${base}/login`, { headers: { Host: `${HOST}:443` } })).status).toBe(200);
-    // A port the door was never given is somebody else's, even under the same name: the address the
-    // Origin check and every passkey are matched against comes from the settings, not from the header.
-    const other = await fetch(`${base}/login`, { headers: { Host: `${HOST}:9999` } });
-    expect(other.status).toBe(403);
-    expect(((await other.json()) as { code: string }).code).toBe("forbidden_host");
-    // And the address people were told to open carries the port.
-    expect(inbox.registry.inbox_auth?.url).toBe(`https://${HOST}:4255/`);
+  test("answers its name at the port it is published at, with nothing configured", async () => {
+    // The owner's setup, measured: the Inbox binds 127.0.0.1, `tailscale serve --https=4255` publishes it,
+    // and config.json names only the host — this process is never told which port TLS ended on, and there
+    // is no setting it has to discover first. So the name is the whole `Host` check, and the address
+    // people actually open has to sign them in.
+    const { base, inbox } = await startWithAccounts();
+    await seed(ME);
+    for (const host of [HOST, `${HOST}:443`, `${HOST}:4255`]) {
+      expect((await fetch(`${base}/login`, { headers: { Host: host } })).status).toBe(200);
+    }
+    const body = await (await fetch(`${base}/login`, { headers: { Host: `${HOST}:4255` } })).text();
+    // The page speaks of the address the person is standing on, and points passkeys at the one address they
+    // belong to: the bare name, whatever port this door happens to answer.
+    expect(body).toContain(`This Inbox lives on <strong>${HOST}:4255</strong>`);
+    expect(body).toContain(`Passkeys need <strong>https://${HOST}</strong>. The password works everywhere.`);
+
+    const signed = await fetch(`${base}/api/auth/sign-in/email`, {
+      method: "POST",
+      headers: { Host: `${HOST}:4255`, "content-type": "application/json", origin: `https://${HOST}:4255`, "x-forwarded-for": nextClient() },
+      body: JSON.stringify({ email: ME, password: PASSWORD }),
+    });
+    expect(signed.status).toBe(200);
+    const cookie = signed.headers.get("set-cookie")?.split(";")[0] ?? "";
+    expect(cookie).toContain("session_token");
+    // The session works at that address — the half that used to fail with better-auth's `INVALID_ORIGIN`.
+    const window = await fetch(`${base}/`, { headers: { Host: `${HOST}:4255`, cookie, accept: "text/html" }, redirect: "manual" });
+    expect(window.status).toBe(200);
+    expect(await window.text()).toContain("<title>Inbox</title>");
+    // What the door publishes about itself is still what the settings say: no port was invented.
+    expect(inbox.registry.inbox_auth?.url).toBe(`https://${HOST}/`);
   }, 30_000);
 
-  test("says its address with the port, so passkeys are aimed at the right one", async () => {
-    const { base } = await startWithAccounts({ httpsPort: 4255 });
-    const page = await fetch(`${base}/login`, { headers: { Host: `${HOST}:4255` } });
-    const body = await page.text();
-    expect(body).toContain(`This Inbox lives on <strong>${HOST}:4255</strong>`);
-    expect(body).toContain(`Passkeys need <strong>https://${HOST}:4255</strong>.`);
+  test("a sign-in at a published port is still same-origin", async () => {
+    // Following the request's own port is not the same as trusting any origin: `Origin` must be this name
+    // at the port the request arrived at, or this name at the port https implies.
+    const { base } = await startWithAccounts();
+    await seed(ME);
+    const at = async (origin: string) => {
+      const answer = await fetch(`${base}/api/auth/sign-in/email`, {
+        method: "POST",
+        headers: { Host: `${HOST}:4255`, "content-type": "application/json", origin, "x-forwarded-for": nextClient() },
+        body: JSON.stringify({ email: ME, password: PASSWORD }),
+      });
+      return answer.status;
+    };
+    expect(await at("https://evil.example.com")).toBe(403); // another site aimed at this port
+    expect(await at(`http://${HOST}:4255`)).toBe(403); // this name over http is a different origin
+    expect(await at(`https://${HOST}:8443`)).toBe(403); // a port nobody is standing on
+    expect(await at(`https://${HOST}`)).toBe(200); // this name at the port https implies, always its own
+  }, 30_000);
+
+  test("answers a port nobody named because the name matched — and that is all the name gives", async () => {
+    // `Host: inbox.example.com:9999` is answered, because the `Host` check can only decide names and the
+    // door is never told which ports exist in front of it. Say plainly what that hands over: the door's own
+    // pages, and — for an address on the allowlist, with an `Origin` for that very port — a password
+    // session for this Inbox. Not the window's owner-only routes (`local_only` still answers), not
+    // passkeys, which belong to the bare name, and nothing at all to a request whose `Origin` is another
+    // site. A made-up port is an oddity of the arrival, not a way in.
+    const { base } = await startWithAccounts();
+    await seed(ME);
+    expect((await fetch(`${base}/login`, { headers: { Host: `${HOST}:9999` } })).status).toBe(200);
+    const signed = await fetch(`${base}/api/auth/sign-in/email`, {
+      method: "POST",
+      headers: { Host: `${HOST}:9999`, "content-type": "application/json", origin: `https://${HOST}:9999`, "x-forwarded-for": nextClient() },
+      body: JSON.stringify({ email: ME, password: PASSWORD }),
+    });
+    expect(signed.status).toBe(200);
+    const cookie = signed.headers.get("set-cookie")?.split(";")[0] ?? "";
+    const off = await fetch(`${base}/api/inbox/sign-in/off`, {
+      method: "POST",
+      headers: { Host: `${HOST}:9999`, cookie, "content-type": "application/json", origin: `https://${HOST}:9999` },
+      body: JSON.stringify({}),
+    });
+    expect(((await off.json()) as { code: string }).code).toBe("local_only");
+  }, 30_000);
+
+  test("a pinned HTTPS port changes the address the door prints, not which ports it answers", async () => {
+    // The opt-in, kept for anyone who wants their address pinned to one port: it decides what the door
+    // *calls itself* — the registry URL, the card, the CLI line. It is not load-bearing for signing in,
+    // and it does not move a passkey.
+    const { base, inbox } = await startWithAccounts({ httpsPort: 4255 });
+    expect(inbox.registry.inbox_auth?.url).toBe(`https://${HOST}:4255/`);
+    for (const host of [HOST, `${HOST}:443`, `${HOST}:4255`, `${HOST}:9999`]) {
+      expect((await fetch(`${base}/login`, { headers: { Host: host } })).status).toBe(200);
+    }
+    const body = await (await fetch(`${base}/login`, { headers: { Host: `${HOST}:9999` } })).text();
+    expect(body).toContain(`This Inbox lives on <strong>${HOST}:9999</strong>`);
+    expect(body).toContain(`Passkeys need <strong>https://${HOST}</strong>.`);
   }, 30_000);
 
   test("refuses a passkey ceremony that arrived over plain HTTP", async () => {
-    // The door listens on loopback HTTP; the proxy in front says what the browser saw. On `http://…` a
-    // passkey cannot be minted at all, so the door says so instead of showing a page whose button fails.
-    const { base } = await startWithAccounts({ httpsPort: 4255 });
-    const insecure = { "x-forwarded-proto": "http", "x-forwarded-host": `${HOST}:4255` };
+    // The door listens on loopback HTTP; the proxy in front says what the browser saw. On an arrival
+    // reported as `http` a passkey cannot be minted at all, so the door says so instead of showing a page
+    // whose button fails. The password path is held to none of this.
+    const { base } = await startWithAccounts();
+    const insecure = { "x-forwarded-proto": "http" };
     await seed(ME);
     const signed = await fetch(`${base}/api/auth/sign-in/email`, {
       method: "POST",
       headers: { Host: `${HOST}:4255`, "content-type": "application/json", origin: `https://${HOST}:4255`, ...insecure },
       body: JSON.stringify({ email: ME, password: PASSWORD }),
     });
-    // The password path is untouched: it works over either arrival.
     expect(signed.status).toBe(200);
     const cookie = signed.headers.get("set-cookie")?.split(";")[0] ?? "";
 
@@ -251,12 +315,13 @@ describe("the sign-in door", () => {
     const window = await fetch(`${base}/api/inbox/state`, { headers: { Host: `${HOST}:4255`, origin: `https://${HOST}:4255`, cookie, ...insecure } });
     expect(await window.text()).not.toContain("insecure_connection");
 
-    // And the same passkey routes answer normally when the proxy says the browser was on HTTPS.
-    const secure = await fetch(`${base}/passkeys`, {
-      headers: { Host: `${HOST}:4255`, "x-forwarded-proto": "https", cookie },
-    });
+    // At the address the keys belong to, the same routes answer — there the arrival is `https://<host>`.
+    const secure = await fetch(`${base}/passkeys`, { headers: { Host: HOST, cookie } });
     expect(secure.status).toBe(200);
-    expect(await secure.text()).toContain("A passkey signs you in to");
+    const management = await secure.text();
+    expect(management).toContain("A passkey signs you in to");
+    // …and it names the bare address, because that is where the key lives whatever port this door answers.
+    expect(management).toContain(`A passkey signs you in to <strong>${passkeyOrigin({ host: HOST })}</strong>`);
   }, 30_000);
 
   test("a request that came through the door cannot change the door", async () => {
@@ -330,23 +395,49 @@ describe("the sign-in door", () => {
     expect(withoutAuthCookies("plannotator-sidebar=open; plannotatorx=1")).toBe("plannotator-sidebar=open; plannotatorx=1");
   });
 
-  test("which Host names this door, and which arrivals may mint a passkey", () => {
-    const at4255 = { host: HOST, httpsPort: 4255 };
-    expect(doorAnswersHost(`${HOST}:4255`, at4255)).toBe(true);
-    expect(doorAnswersHost(HOST, at4255)).toBe(true);
-    expect(doorAnswersHost(`${HOST}:443`, at4255)).toBe(true);
-    expect(doorAnswersHost(`${HOST}:4256`, at4255)).toBe(false);
-    // A door published at 443 answers no port but 443 — the old "strip any port" rule let a made-up one in.
-    expect(doorAnswersHost(`${HOST}:8443`, { host: HOST, httpsPort: null })).toBe(false);
-    expect(doorAnswersHost(`${HOST}:443`, { host: HOST, httpsPort: null })).toBe(true);
-    expect(doorAnswersHost("evil.example.net", at4255)).toBe(false);
-    expect(doorAnswersHost(null, at4255)).toBe(true);
+  test("which Host names this door, which origins a sign-in may come from, and which arrivals may run a ceremony", () => {
+    // The name is the whole check: whatever port the publisher put after it, this door answers, and a name
+    // that is not this door's never does. A request with no `Host` at all answers as it always has — Bun
+    // does hand those through (HTTP/1.0, which is what a local health check sends), it names nothing, and
+    // it arrives with no `Origin` either, which is what better-auth needs to start a session.
+    expect(doorAnswersHost(`${HOST}:4255`, { host: HOST })).toBe(true);
+    expect(doorAnswersHost(`${HOST}:443`, { host: HOST })).toBe(true);
+    expect(doorAnswersHost(`${HOST}:9999`, { host: HOST })).toBe(true);
+    expect(doorAnswersHost(HOST, { host: HOST })).toBe(true);
+    expect(doorAnswersHost(`${HOST}:notaport`, { host: HOST })).toBe(false);
+    expect(doorAnswersHost("evil.example.net:4255", { host: HOST })).toBe(false);
+    expect(doorAnswersHost("127.0.0.1:4255", { host: HOST })).toBe(false);
+    expect(doorAnswersHost(null, { host: HOST })).toBe(true);
 
-    expect(arrivedOverTls(new Headers())).toBe(true);
-    expect(arrivedOverTls(new Headers({ "x-forwarded-proto": "https" }))).toBe(true);
-    expect(arrivedOverTls(new Headers({ "x-forwarded-proto": "http" }))).toBe(false);
-    // The first hop of a chain is what the browser saw.
-    expect(arrivedOverTls(new Headers({ "x-forwarded-proto": "http, https" }))).toBe(false);
+    // A sign-in's `Origin` follows the address the request arrived at: same-origin, plus this name at the
+    // port https implies. A foreign name in `Host` contributes nothing — the door refused it already.
+    expect(doorOrigins(`${HOST}:4255`, { host: HOST })).toEqual([`https://${HOST}`, `https://${HOST}:4255`]);
+    expect(doorOrigins(HOST, { host: HOST })).toEqual([`https://${HOST}`]);
+    expect(doorOrigins(`${HOST}:443`, { host: HOST })).toEqual([`https://${HOST}`]);
+    expect(doorOrigins("evil.example.com:4255", { host: HOST })).toEqual([`https://${HOST}`]);
+    expect(doorOrigins(null, { host: HOST })).toEqual([`https://${HOST}`]);
+
+    // Passkeys stay strict where strictness is real: WebAuthn compares the arrival against the exact
+    // origin a key was minted for, so the door's keys belong to the bare name and no port moves them.
+    expect(passkeyOrigin({ host: HOST })).toBe(`https://${HOST}`);
+    expect(doorOffersPasskeys(new Headers({ host: HOST }), { host: HOST })).toBe(true);
+    expect(doorOffersPasskeys(new Headers({ host: `${HOST}:443` }), { host: HOST })).toBe(true);
+    expect(doorOffersPasskeys(new Headers({ host: HOST, "x-forwarded-proto": "https" }), { host: HOST })).toBe(true);
+    // A header cannot open a ceremony. It can only ever close one: `http` on the first hop refuses, even
+    // at the address the keys belong to, because the browser there is not on a secure page.
+    expect(doorOffersPasskeys(new Headers({ host: HOST, "x-forwarded-proto": "http" }), { host: HOST })).toBe(false);
+    expect(doorOffersPasskeys(new Headers({ host: `${HOST}:443`, "x-forwarded-proto": "http, https" }), { host: HOST })).toBe(false);
+    expect(doorOffersPasskeys(new Headers({ host: `${HOST}:4255`, "x-forwarded-proto": "https" }), { host: HOST })).toBe(false);
+    expect(doorOffersPasskeys(new Headers({ host: `${HOST}:9999` }), { host: HOST })).toBe(false);
+    expect(doorOffersPasskeys(new Headers(), { host: HOST })).toBe(false);
+    expect(doorOffersPasskeys(new Headers({ host: "evil.example.com", "x-forwarded-proto": "https" }), { host: HOST })).toBe(false);
+    // Loopback is a secure context in every browser, so http there may run one. The settings refuse a
+    // loopback name today (`isPublicDnsName`), so this is pinned for whoever lifts that — it is the door's
+    // own arrival when it does, not somebody else's header.
+    expect(doorOffersPasskeys(new Headers({ host: "127.0.0.1:19501" }), { host: HOST })).toBe(true);
+    expect(doorOffersPasskeys(new Headers({ host: "localhost" }), { host: HOST })).toBe(true);
+    // And the one proof that is real, for the day the door ends TLS itself instead of a proxy doing it.
+    expect(doorOffersPasskeys(new Headers({ host: `${HOST}:4255` }), { host: HOST }, { tls: true })).toBe(true);
   });
 
   test("next stays on this site", () => {
