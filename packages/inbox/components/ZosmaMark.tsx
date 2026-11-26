@@ -12,7 +12,7 @@
  */
 export function ZosmaMark() {
   return (
-    <span className="ib-brandmark" aria-hidden="true">
+    <span className="ib-brandmark" data-mark="zosma" aria-hidden="true">
       {/* The tile is this fork's own, drawn to the favicon's figure: a 100-unit square, 22 units of corner.
           The inner svg is the mark's own bounds on zosma.ai, so the drawn shape is the site's, not a redraw. */}
       <svg viewBox="0 0 100 100" focusable="false">

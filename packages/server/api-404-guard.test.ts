@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, YELLOW_FAVICON_ICO_BYTES, YELLOW_FAVICON_PNG_BYTES } from "../core/favicon";
+import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, YELLOW_FAVICON_ICO_BYTES, YELLOW_FAVICON_PNG_BYTES, ZOSMA_FAVICON_ICO_BYTES, ZOSMA_FAVICON_PNG_BYTES } from "../core/favicon";
 import { saveConfig } from "./config";
 import { packApp } from "../shared/packed-app";
 // Use a distinct module key so unrelated mock.module() tests cannot replace
@@ -273,25 +273,27 @@ describe("API route 404 guards", () => {
         // the previous icon on the next session after a switch.
         expect(faviconResponse.headers.get("cache-control")).toBe("no-cache");
         expect(new Uint8Array(await faviconResponse.arrayBuffer())).toEqual(
-          FAVICON_PNG_BYTES,
+          ZOSMA_FAVICON_PNG_BYTES,
         );
 
-        // /favicon.ico, what the entry HTML links: Glass's multi-size .ico on Bun and Pi alike.
+        // /favicon.ico, what the entry HTML links: Zosma's multi-size .ico on Bun and Pi alike.
         const icoResponse = await fetch(`${server.url}/favicon.ico`);
         expect(icoResponse.status).toBe(200);
         expect(icoResponse.headers.get("content-type")).toBe("image/x-icon");
         expect(icoResponse.headers.get("cache-control")).toBe("no-cache");
-        expect(new Uint8Array(await icoResponse.arrayBuffer())).toEqual(FAVICON_ICO_BYTES);
+        expect(new Uint8Array(await icoResponse.arrayBuffer())).toEqual(ZOSMA_FAVICON_ICO_BYTES);
 
         // Cross-runtime parity for the other styles: Bun and Pi must agree on
         // both the bytes and the content type, since the entry HTML's
         // <link rel="icon"> declares no type of its own.
-        // Face has no .ico: /favicon.ico answers its PNG. A 'classic' left by
-        // 0.28.57 (the removed P) answers the default, Glass, on both URLs.
+        // Face has no .ico: /favicon.ico answers its PNG. Glass is still its own icon. A
+        // 'classic' left by 0.28.57 (the removed P) answers the default, Zosma, on both URLs.
         for (const [style, png, ico, icoType] of [
+          ["zosma", ZOSMA_FAVICON_PNG_BYTES, ZOSMA_FAVICON_ICO_BYTES, "image/x-icon"],
+          ["glass", FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, "image/x-icon"],
           ["yellow", YELLOW_FAVICON_PNG_BYTES, YELLOW_FAVICON_ICO_BYTES, "image/x-icon"],
           ["totman", FACE_FAVICON_PNG_BYTES, FACE_FAVICON_PNG_BYTES, "image/png"],
-          ["classic", FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, "image/x-icon"],
+          ["classic", ZOSMA_FAVICON_PNG_BYTES, ZOSMA_FAVICON_ICO_BYTES, "image/x-icon"],
         ] as const) {
           saveConfig({ favicon: style as never });
           const styleResponse = await fetch(`${server.url}/favicon.png`);
