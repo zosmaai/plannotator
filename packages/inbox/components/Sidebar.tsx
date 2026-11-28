@@ -26,6 +26,7 @@ import { shortProjectNames } from '../projectLabels';
 import { shownProjects, type ProjectAction } from '../projectMenu';
 import { projectSortControl, setProjectSort, sortProjects, useProjectSort, type ProjectSort } from '../projectSort';
 import { selfMachineId } from '../inboxUrl';
+import { onSignedInAs, signedInAs as signedInAsStore } from '../signedInAs';
 import { ProjectRow } from './ProjectRow';
 import { newSessionTip } from '../compose/model';
 import { PinnedRow, type PinnedAction } from './PinnedRow';
@@ -369,6 +370,10 @@ export function Sidebar(props: SidebarProps) {
    */
   const asideRef = useRef<HTMLElement>(null);
   const focusedIn = useRef<SidebarSection | null>(null);
+  // One line for whoever came in through the sign-in door: the address the door itself named on its
+  // answers (packages/inbox/signedInAs.ts). A local window never sees that header and shows nothing.
+  const [signedInAs, setSignedInAs] = useState<string | null>(() => signedInAsStore());
+  useEffect(() => onSignedInAs(setSignedInAs), []);
   useEffect(() => {
     const track = (event: FocusEvent) => {
       const target = event.target instanceof Element && asideRef.current?.contains(event.target) ? event.target : null;
@@ -938,6 +943,11 @@ export function Sidebar(props: SidebarProps) {
         )}
         {restartAgents.total > 0 && props.onRestartSessions && <RestartSessionsRow agents={restartAgents} onOpen={pick(props.onRestartSessions)} />}
         {stack(bottom.slice(noticesAfter))}
+        {signedInAs && (
+          <div className="ib-signed-in" data-signed-in-as={signedInAs}>
+            signed in as {signedInAs}
+          </div>
+        )}
       </div>
       <SidebarMenu menu={menu} layout={layout} drawn={props.usageInstalled ? drawn : new Set([...drawn].filter((item) => item !== 'usage'))} />
     </aside>

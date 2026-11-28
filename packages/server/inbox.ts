@@ -426,7 +426,7 @@ import { createInboxCloudGate } from "./inbox-cloud-gate";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { createInboxTailscale, isDoorTailnetPort, type InboxTailscale, type InboxTailscaleTimers } from "./inbox-tailscale";
 import { createInboxCfAccess, type InboxCfAccess, type InboxCfAccessContext } from "./inbox-cf-access";
-import { createInboxAuthDoor } from "./inbox-auth-door";
+import { appendAuthDoorNote, createInboxAuthDoor } from "./inbox-auth-door";
 import { CF_ACCESS_ROUTE, createCfAccessRoutes, type CfAccessRouteHooks } from "./inbox-cf-access-routes";
 import { AUTH_ROUTE, createAuthRoutes, refuseDoorOrigin } from "./inbox-auth-routes";
 import { hasCfEdgeHeaders } from "@plannotator/shared/inbox/cf-access";
@@ -8958,7 +8958,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     dispatch: async (req) => markPlannotatorResponse(await encodeInboxResponse(req, await served(req, "tailnet"))),
     forbiddenPort: (candidate) => candidate === port || candidate === INBOX_FORBIDDEN_PORT || isDoorTailnetPort(candidate),
     maxRequestBodySize: INBOX_MAX_REQUEST_BYTES,
-    note: debugLog ? (event, data) => debugLog.note(event, data) : undefined,
+    // Wired whether or not debug logging is on, so a normal install leaves a trail naming which account
+    // made which request. The debug log still gets the full note when it is on.
+    note: (event, data) => {
+      debugLog?.note(event, data);
+      appendAuthDoorNote(dataDir, event, data);
+    },
   });
   authDoor.start();
   authRoutes = createAuthRoutes({
