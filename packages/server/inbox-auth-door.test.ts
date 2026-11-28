@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { doorAnswersHost, doorOffersPasskeys, doorOrigins, passkeyOrigin, passkeyOrigins, safeNextPath, withoutAuthCookies } from "@plannotator/shared/inbox/auth-door";
@@ -161,6 +161,47 @@ describe("the sign-in door", () => {
     const page = await request(`${base}/`, { headers: { cookie: signed.cookie!, accept: "text/html" }, redirect: "manual" });
     expect(page.status).toBe(303);
     expect(page.headers.get("location")).toContain("error=account");
+  }, 30_000);
+
+  test("names the signed-in account on the answers it proxies", async () => {
+    const { base } = await startWithAccounts();
+    await seed(ME);
+    const signed = await signIn(base, ME);
+    expect(signed.answer.status).toBe(200);
+
+    const page = await request(`${base}/`, { headers: { cookie: signed.cookie! }, redirect: "manual" });
+    expect(page.status).toBe(200);
+    // The one seam out: the door names the account it just verified, on the answer it made. One-way —
+    // the window may read this, and nothing it sends is consulted for it.
+    expect(page.headers.get("X-Plannotator-Account")).toBe(ME);
+
+    const api = await request(`${base}/api/inbox/health`, { headers: { cookie: signed.cookie!, accept: "application/json" }, redirect: "manual" });
+    expect(api.headers.get("X-Plannotator-Account")).toBe(ME);
+
+    // A request naming an account of its own is not listened to: the answer still names who the door
+    // itself signed in, so a page cannot claim to be someone else.
+    const forged = await request(`${base}/`, { headers: { cookie: signed.cookie!, "X-Plannotator-Account": "mallory@example.com" }, redirect: "manual" });
+    expect(forged.status).toBe(200);
+    expect(forged.headers.get("X-Plannotator-Account")).toBe(ME);
+  }, 30_000);
+
+  test("leaves a trail naming which account made which request, with no debug log on", async () => {
+    // A normal install: nothing here sets the debug log. The door's note is wired either way, and its
+    // trail on disk names who asked for what — a note, not a UI and not something to configure.
+    const { base } = await startWithAccounts();
+    await seed(ME);
+    const signed = await signIn(base, ME);
+
+    const answer = await request(`${base}/`, { headers: { cookie: signed.cookie! }, redirect: "manual" });
+    expect(answer.status).toBe(200);
+
+    const trail = readFileSync(join(dataDir, "inbox-auth", "door-trail.log"), "utf8");
+    const entries = trail
+      .split("\n")
+      .filter((line) => line !== "")
+      .map((line) => JSON.parse(line) as { event: string; method?: string; path?: string; account?: { address?: string } });
+    const hit = entries.find((entry) => entry.event === "auth_door_request" && entry.method === "GET" && entry.path === "/");
+    expect(hit?.account?.address).toBe(ME);
   }, 30_000);
 
   test("never hands on an agent's route, whatever the session", async () => {

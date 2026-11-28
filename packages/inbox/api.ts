@@ -73,6 +73,7 @@ import { NO_FILE_OPS, type ReplyDraftFileOps, type ReplyDraftNotLanded } from '@
 import { FEEDBACK_UNAVAILABLE } from '@plannotator/core/product-feedback';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { learnDebugLog, resumeDebugLog } from './debugLog';
+import { learnSignedInAs } from './signedInAs';
 import type { RecipientConnection } from './deliveryLine';
 export { dispatchInboxFrame, INBOX_EVENT_FRAMES, openInboxEventFrames, subscribeInboxEvents, type InboxEventFrame, type InboxEventFrameName, type InboxEventHandlers, type InboxEventWindow, type MachineRecordFrame } from './eventFrames';
 import type { PatchBlobIds } from '@plannotator/core/diff-files';
@@ -719,6 +720,7 @@ export async function get<T>(path: string, signal?: AbortSignal, arriving?: (res
   resumeDebugLog();
   const response = await fetch(path, { headers: { Accept: 'application/json', 'X-Plannotator-Load': pageLoad }, cache: 'no-store', signal });
   learnDebugLog(response);
+  learnSignedInAs(response);
   if (machine && (await localInstead(response))) return get<T>(localRoute(path), signal, arriving);
   const answer = await readJson<T>(arriving ? await arriving(response) : response);
   // Local ids come only from this Inbox's own records (list rows, the archived list, thread reads, its own
@@ -907,6 +909,7 @@ export async function post<T>(path: string, body: Record<string, unknown>, init:
     body: zipped ?? text,
     ...(init.keepalive && (zipped ? zipped.byteLength : new TextEncoder().encode(text).length) <= KEEPALIVE_BODY_MAX ? { keepalive: true } : {}),
   });
+  learnSignedInAs(response);
   if (machine && (await localInstead(response))) return post<T>(localRoute(path), body);
   if (machine && response.status === 202) {
     const held = (await response.clone().json().catch(() => ({}))) as { outbox?: OutboxView; machine?: MachineView | null };

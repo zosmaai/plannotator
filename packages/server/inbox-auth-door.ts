@@ -25,6 +25,9 @@
  * connection routes are refused here, as they are at the tailnet's listener.
  */
 
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { INBOX_ACCOUNT_HEADER } from "@plannotator/core/inbox-account-header";
 import { loadConfig } from "@plannotator/shared/config";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { updateOwnInboxRegistry, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
@@ -109,6 +112,8 @@ export function scrubAuthDoorHeaders(source: Headers): Headers {
     }
     // Cloudflare's and Tailscale's own headers must not decide anything here: this door already did.
     if (lower.startsWith("cf-") || lower.startsWith("tailscale-")) return;
+    // One-way: the door alone names the account, on the answer. Whatever a request claims of its own is dropped.
+    if (lower === INBOX_ACCOUNT_HEADER.toLowerCase()) return;
     headers.append(name, value);
   });
   headers.set("x-forwarded-proto", "https");
@@ -132,6 +137,30 @@ function wantsDocument(req: Request, path: string): boolean {
   if (dest === "document" || dest === "iframe") return true;
   if (dest !== undefined) return false;
   return req.method === "GET" && (path === "/" || !path.startsWith("/api/")) && (req.headers.get("accept") ?? "").includes("text/html");
+}
+
+/** The file the door's trail lives in: inside the folder its own config already lives in, so a person
+ * who wants to read it knows where the door is, and nothing has to be turned on for it to exist. */
+export const DOOR_TRAIL_FILE = "door-trail.log";
+
+/**
+ * Write the door's note to disk. This is wired whether or not debug logging is on: a normal install
+ * must leave a trail that names which account made which request. It stays a note — no UI, nothing to
+ * configure — and it is capped, because the trail only ever needs the newest answers to "who asked
+ * what, when": when it grows past the cap the oldest half goes.
+ */
+export function appendAuthDoorNote(dataDir: string, event: string, data: Record<string, unknown>): void {
+  const file = join(dataDir, "inbox-auth", DOOR_TRAIL_FILE);
+  try {
+    mkdirSync(join(dataDir, "inbox-auth"), { recursive: true });
+    writeFileSync(file, `${JSON.stringify({ at: new Date().toISOString(), event, ...data })}\n`, { flag: "a" });
+    if (statSync(file).size > 128 * 1024) {
+      const lines = readFileSync(file, "utf8").split("\n").filter((line) => line !== "");
+      writeFileSync(file, `${lines.slice(Math.ceil(lines.length / 2)).join("\n")}\n`);
+    }
+  } catch {
+    // A trail that cannot be written is never a reason a request fails. The door answers regardless.
+  }
 }
 
 export function createInboxAuthDoor(context: InboxAuthDoorContext) {
@@ -319,11 +348,22 @@ export function createInboxAuthDoor(context: InboxAuthDoorContext) {
     // came from by then: its door headers are scrubbed and its address is this machine's own loopback.
     // The sign-in settings are answered on every route, and this is what lets the Inbox refuse to let
     // someone who signed in at the door change that door.
-    context.note?.("auth_door_request", { path: path.split("/").slice(0, 3).join("/") });
+    // The trail a normal install keeps: which account made which request through this door, named by the
+    // session the door itself verified. A note, not a UI and not a log file the person has to turn on.
+    context.note?.("auth_door_request", {
+      path: path.split("/").slice(0, 3).join("/"),
+      method: req.method,
+      account: { address: signed.email, ...(signed.name ? { name: signed.name } : {}) },
+    });
     const forward = rebuild(req, scrubAuthDoorHeaders(req.headers));
     // The account is marked with the request, from the session this door verified and from nothing the request said.
     markFromAuthDoor(forward, { email: signed.email, name: signed.name });
-    return context.dispatch(forward);
+    const answer = await context.dispatch(forward);
+    // The one seam out, mirroring the mark in: the door names the account it signed in on the answer it
+    // just made, and the window may read that. It is one-way — nothing the window sends ever names an
+    // account — so a page cannot claim to be someone else, and the session cookies still stop at the door.
+    answer.headers.set(INBOX_ACCOUNT_HEADER, signed.email);
+    return answer;
   };
 
   const start = () => {
